@@ -22,6 +22,11 @@ import (
 )
 
 func main() {
+	// 约定：优先从项目根目录 `.env` 加载配置（不覆盖已有环境变量），便于本地开发与部署一致。
+	if err := config.LoadDotEnv(".env"); err != nil {
+		log.Fatalf("加载 .env 失败: %v", err)
+	}
+
 	cfg, err := config.LoadFromEnv()
 	if err != nil {
 		log.Fatalf("加载配置失败: %v", err)
