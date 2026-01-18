@@ -1,0 +1,186 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"example.com/lingxing/golib/v2/sdk/dsco"
+	"example.com/lingxing/golib/v2/sdk/lingxing"
+	"example.com/lingxing/golib/v2/tool/logger"
+	"lingxingipass/internal/platform/adminhttp"
+	"lingxingipass/internal/platform/config"
+	"lingxingipass/internal/platform/db"
+	"lingxingipass/internal/platform/scheduler"
+	"lingxingipass/internal/store"
+	"lingxingipass/internal/sync"
+)
+
+func main() {
+	cfg, err := config.LoadFromEnv()
+	if err != nil {
+		log.Fatalf("加载配置失败: %v", err)
+	}
+
+	sqlDB, err := db.OpenMySQL(cfg.DB.DSN)
+	if err != nil {
+		log.Fatalf("连接数据库失败: %v", err)
+	}
+	defer sqlDB.Close()
+
+	if err := logger.Init(logger.Config{Dir: cfg.Log.Dir, Stdout: true}); err != nil {
+		log.Fatalf("初始化日志失败: %v", err)
+	}
+	defer logger.Sync()
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	s := scheduler.New()
+	// 一期先跑通骨架：具体 jobs 按开发步骤逐个接入。
+	s.Add("heartbeat", time.Duration(cfg.Jobs.HeartbeatIntervalSec)*time.Second, func(ctx context.Context) error {
+		logger.Info(ctx, "heartbeat", "time", time.Now().UTC().Format(time.RFC3339))
+		return nil
+	})
+
+	// store 始终初始化：HTTP 管理端需要读写水位、查看人工任务。
+	orderState, err := store.NewOrderStateStore(sqlDB)
+	if err != nil {
+		log.Fatalf("初始化 OrderStateStore 失败: %v", err)
+	}
+	watermark, err := store.NewWatermarkStore(sqlDB)
+	if err != nil {
+		log.Fatalf("初始化 WatermarkStore 失败: %v", err)
+	}
+	manual, err := store.NewManualTaskStore(sqlDB)
+	if err != nil {
+		log.Fatalf("初始化 ManualTaskStore 失败: %v", err)
+	}
+	orderRaw, err := store.NewDscoOrderRawStore(sqlDB)
+	if err != nil {
+		log.Fatalf("初始化 DscoOrderRawStore 失败: %v", err)
+	}
+
+	runners := map[string]adminhttp.JobRunner{}
+
+	needDSCO := cfg.Jobs.PullDSCOOrdersEnable || cfg.Jobs.PushOrdersToLingXingEnable || cfg.Jobs.AckToDSCOEnable || cfg.Jobs.ShipToDSCOEnable || cfg.Jobs.InvoiceToDSCOEnable || cfg.Jobs.SyncStockEnable
+	needLingXing := cfg.Jobs.PushOrdersToLingXingEnable || cfg.Jobs.AckToDSCOEnable || cfg.Jobs.ShipToDSCOEnable || cfg.Jobs.SyncStockEnable
+
+	var dscoCli *dsco.Client
+	if needDSCO {
+		dscoCli, err = dsco.New(dsco.Config{
+			BaseURL: cfg.DSCO.BaseURL,
+			Token:   cfg.DSCO.Token,
+		})
+		if err != nil {
+			log.Fatalf("初始化 DSCO SDK 失败: %v", err)
+		}
+	}
+
+	var lxCli *lingxing.Client
+	if needLingXing {
+		lxCli, err = lingxing.New(lingxing.Config{
+			BaseURL:     cfg.LingXing.BaseURL,
+			AppID:       cfg.LingXing.AppID,
+			AccessToken: cfg.LingXing.AccessToken,
+		})
+		if err != nil {
+			log.Fatalf("初始化 领星 SDK 失败: %v", err)
+		}
+	}
+
+	var p *sync.OrderPipeline
+	if needDSCO {
+		p, err = sync.NewOrderPipeline(dscoCli, lxCli, orderState, watermark, manual, orderRaw, time.Now)
+		if err != nil {
+			log.Fatalf("初始化 OrderPipeline 失败: %v", err)
+		}
+	}
+
+	if p != nil {
+		runners["pull_dsco_orders"] = func(ctx context.Context) error { return p.PullOrders(ctx) }
+		runners["push_orders_to_lingxing"] = func(ctx context.Context) error {
+			return p.PushOrdersToLingXing(ctx, cfg.LingXing.PlatformCode, cfg.LingXing.StoreID, cfg.Jobs.PushOrdersToLingXingBatchSize)
+		}
+		runners["ack_to_dsco"] = func(ctx context.Context) error {
+			return p.AckToDSCO(ctx, cfg.LingXing.PlatformCode, cfg.LingXing.StoreID)
+		}
+		runners["ship_to_dsco"] = func(ctx context.Context) error {
+			return p.ShipToDSCO(ctx, cfg.LingXing.PlatformCode, cfg.LingXing.StoreID, cfg.LingXing.SID)
+		}
+		runners["invoice_to_dsco"] = func(ctx context.Context) error { return p.InvoiceToDSCO(ctx, cfg.Jobs.InvoiceToDSCOBatchSize) }
+	}
+
+	var sp *sync.StockPipeline
+	if cfg.Jobs.SyncStockEnable {
+		sp, err = sync.NewStockPipeline(dscoCli, lxCli, manual, cfg.Stock.LingXingWIDToDSCOWarehouseCode, cfg.Stock.LingXingSKUToDSCOSKU)
+		if err != nil {
+			log.Fatalf("初始化 StockPipeline 失败: %v", err)
+		}
+		runners["sync_stock"] = func(ctx context.Context) error { return sp.SyncStock(ctx, cfg.Jobs.SyncStockBatchSize) }
+	}
+
+	// 调度任务接入
+	if cfg.Jobs.PullDSCOOrdersEnable && p != nil {
+		s.Add("pull_dsco_orders", time.Duration(cfg.Jobs.PullDSCOOrdersIntervalSec)*time.Second, func(ctx context.Context) error {
+			return p.PullOrders(ctx)
+		})
+	}
+	if cfg.Jobs.PushOrdersToLingXingEnable && p != nil {
+		s.Add("push_orders_to_lingxing", time.Duration(cfg.Jobs.PushOrdersToLingXingIntervalSec)*time.Second, func(ctx context.Context) error {
+			return p.PushOrdersToLingXing(ctx, cfg.LingXing.PlatformCode, cfg.LingXing.StoreID, cfg.Jobs.PushOrdersToLingXingBatchSize)
+		})
+	}
+	if cfg.Jobs.AckToDSCOEnable && p != nil {
+		s.Add("ack_to_dsco", time.Duration(cfg.Jobs.AckToDSCOIntervalSec)*time.Second, func(ctx context.Context) error {
+			return p.AckToDSCO(ctx, cfg.LingXing.PlatformCode, cfg.LingXing.StoreID)
+		})
+	}
+	if cfg.Jobs.ShipToDSCOEnable && p != nil {
+		s.Add("ship_to_dsco", time.Duration(cfg.Jobs.ShipToDSCOIntervalSec)*time.Second, func(ctx context.Context) error {
+			return p.ShipToDSCO(ctx, cfg.LingXing.PlatformCode, cfg.LingXing.StoreID, cfg.LingXing.SID)
+		})
+	}
+	if cfg.Jobs.InvoiceToDSCOEnable && p != nil {
+		s.Add("invoice_to_dsco", time.Duration(cfg.Jobs.InvoiceToDSCOIntervalSec)*time.Second, func(ctx context.Context) error {
+			return p.InvoiceToDSCO(ctx, cfg.Jobs.InvoiceToDSCOBatchSize)
+		})
+	}
+	if cfg.Jobs.SyncStockEnable && sp != nil {
+		s.Add("sync_stock", time.Duration(cfg.Jobs.SyncStockIntervalSec)*time.Second, func(ctx context.Context) error {
+			return sp.SyncStock(ctx, cfg.Jobs.SyncStockBatchSize)
+		})
+	}
+
+	// HTTP 管理端：始终可用（用于改水位/查人工任务/手动跑一次任务）
+	if cfg.HTTP.Enable {
+		h, err := adminhttp.NewHandler(watermark, manual, runners)
+		if err != nil {
+			log.Fatalf("初始化 HTTP 管理端失败: %v", err)
+		}
+
+		srv := &http.Server{Addr: cfg.HTTP.Addr, Handler: h}
+		go func() {
+			logger.Info(ctx, "http_start", "addr", cfg.HTTP.Addr)
+			if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				logger.Error(ctx, "http_error", "err", err.Error())
+				stop()
+			}
+		}()
+		go func() {
+			<-ctx.Done()
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = srv.Shutdown(shutdownCtx)
+		}()
+	}
+
+	s.Start(ctx)
+	<-ctx.Done()
+	s.Stop()
+}

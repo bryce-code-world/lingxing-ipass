@@ -1,1 +1,4 @@
 golib
+logs/
+**/logs/
+*.log
