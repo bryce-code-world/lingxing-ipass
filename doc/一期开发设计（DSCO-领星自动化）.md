@@ -1,0 +1,416 @@
+# 第一期开发设计（DSCO-领星自动化）
+
+> 本文是“可落地到代码”的开发设计文档，基于：
+>
+> - `doc/一期业务需求（DSCO-领星自动化）.md`
+> - `doc/一期系统设计（DSCO-领星自动化）.md`
+>
+> 关键原则：
+> - 领星是业务中枢：领域代码围绕“领星订单/出库/库存”等组织；DSCO 作为集成点接入。
+> - 最小存储：不落业务明细，只存状态/幂等/水位/人工队列。
+> - 编排与领域分离：通用技术编排（调度/并发/重试/DB）与业务领域高聚合区分开。
+
+## 1. 代码结构（以领星为业务中心）
+
+```
+.
+├── cmd/
+│   └── ipass/
+│       └── main.go                     # 入口：加载配置、建 DB、建 SDK、启动调度器
+├── internal/
+│   ├── platform/                       # 通用技术底座（不包含业务语义）
+│   │   ├── config/
+│   │   │   └── config.go               # 配置结构/加载/校验
+│   │   ├── db/
+│   │   │   └── db.go                   # *sql.DB 初始化、ping、关闭
+│   │   ├── scheduler/
+│   │   │   └── scheduler.go            # ticker/cron（一期选一种即可）
+│   │   ├── retry/
+│   │   │   └── retry.go                # 指数退避（简单直白）
+│   │   ├── timeutil/
+│   │   │   └── timeutil.go             # 时间转换（领星时间字符串 -> ISO8601）
+│   │   └── observability/
+│   │       └── log.go                  # 结构化日志（按 dscoOrderId 打通链路）
+│   │
+│   ├── store/                          # 最小状态库（只存状态，不存业务明细）
+│   │   ├── order_state_store.go        # sync_order_state：upsert/抢占/更新状态
+│   │   ├── watermark_store.go          # job_watermark：读写水位
+│   │   └── manual_task_store.go        # manual_task：写入人工处理任务
+│   │
+│   ├── integrations/                   # 外部系统集成（基于 SDK 的“项目级薄封装”）
+│   │   ├── dsco/
+│   │   │   ├── client.go               # 组合 golib/v2/sdk/dsco.Client
+│   │   │   └── fetch.go                # 拉单/回源取单/ACK/发货/发票/库存的组合调用
+│   │   └── lingxing/
+│   │       ├── client.go               # 组合 golib/v2/sdk/lingxing.Client
+│   │       └── fetch.go                # 创建订单/订单列表/出库单/库存的组合调用
+│   │
+│   ├── lingxing/                       # 领域层：以领星为中心高聚合
+│   │   ├── order/                      # 订单域：推单、ACK 判定、平台单号策略
+│   │   │   ├── service.go
+│   │   │   ├── mapper_from_dsco.go
+│   │   │   └── types.go
+│   │   ├── outbound/                   # 出库/发货域：tracking_no/行项目
+│   │   │   ├── service.go
+│   │   │   └── types.go
+│   │   └── inventory/                  # 库存域：可用库存/映射注入
+│   │       ├── service.go
+│   │       ├── mapping.go
+│   │       └── types.go
+│   │
+│   └── sync/                           # 业务闭环编排：把领域动作串成一期流程
+│       ├── order_pipeline.go           # 拉单->推单->ACK->发货->发票 的通道逻辑
+│       └── stock_pipeline.go           # 库存同步通道逻辑
+│
+└── migrations/
+    └── 0001_init.sql                   # 建表（来自系统设计 10.2）
+```
+
+### 1.1 各层职责边界（必须遵守）
+
+- `internal/platform/*`：只做通用能力，不出现 DSCO/领星字段名，不出现 `order_status/status_arr` 这类业务枚举。
+- `internal/store/*`：只做 DB 读写，入参必须是简单类型或状态模型；禁止拼装 API 请求。
+- `internal/integrations/*`：只做“如何调用 SDK 才能拿到/回传数据”，不做业务口径判断，不写 DB。
+- `internal/lingxing/*`：业务域高聚合：定义一期口径（可 ACK/可回传发货/可用库存字段等）、映射规则、缺字段/多包裹的处理策略。
+- `internal/sync/*`：编排：什么时候调用哪个领域动作、什么时候写状态、什么时候转人工。
+
+## 2. 数据库与状态模型（一期只存最小状态）
+
+### 2.1 表结构
+
+使用 `migrations/0001_init.sql`（来自 `doc/一期系统设计（DSCO-领星自动化）.md` 的 10.2）：
+- `sync_order_state`
+- `job_watermark`
+- `manual_task`
+
+### 2.2 内部状态枚举（TINYINT）
+
+- `0 未处理`
+- `1 成功`
+- `2 失败（可重试）`
+- `3 人工处理（不自动重试）`
+
+对应字段：
+- `pushed_to_lx_status`
+- `acked_to_dsco_status`
+- `shipped_to_dsco_status`
+- `invoiced_to_dsco_status`
+
+## 3. 配置与映射注入（最小化）
+
+### 3.1 必要配置（建议落地到 `internal/platform/config/config.go`）
+
+- DSCO：`BaseURL`、`Token`（直接 `Authorization: bearer <token>`）
+- 领星：`BaseURL`、`AppID`、`AccessToken`
+- 领星推单固定参数：`platform_code`、`store_id`
+- 任务开关/频率：pull/push/ack/ship/invoice/stock
+- 映射注入：
+  - 仓库映射：`lingxing wid -> dsco warehouse code`
+  - SKU 映射：`lingxing sku -> dsco sku`（可空）
+
+### 3.2 映射注入落点（必须可替换）
+
+映射不要写死在代码里：
+- 落地为配置文件（推荐）或环境变量 JSON
+- `internal/lingxing/inventory/mapping.go` 定义结构体，启动时注入到库存域服务
+
+## 4. 领域模型（以领星为中心）
+
+> 领域模型指“本系统内部的最小业务视图”，不是 DSCO/领星的完整 DTO。
+
+### 4.1 订单域（`internal/lingxing/order`）
+
+职责：
+- DSCO Order -> 领星 CreateOrdersV2（只映射一期必填字段）
+- ACK 判定口径：`order_status=5（待发货）`
+- 已发货候选口径：`order_status=6（已发货）`
+
+关键约束：
+- `platform_order_no` 一期固定使用 `dscoOrderId`（用于反查与幂等）
+
+### 4.2 出库/发货域（`internal/lingxing/outbound`）
+
+职责：
+- 从领星出库单（`wmsOrderList`）提取回传 DSCO 发货的最小信息：
+  - `tracking_no`、`delivered_at`、`product_info[].sku/count`
+- 多包裹识别：同一 `dscoOrderId` 出现多个 `tracking_no` -> 转人工
+
+### 4.3 库存域（`internal/lingxing/inventory`）
+
+职责：
+- 领星库存口径：可用库存 = `product_valid_num`
+- 应用仓库/SKU 映射后，输出 DSCO `inventory/singleItem` 所需结构
+
+## 5. 闭环编排（`internal/sync`）
+
+### 5.1 为什么需要 pipeline
+
+job 本质是“触发器”，不应该承载业务判断。pipeline 负责把多个领域动作串起来并写状态：
+- 触发（scheduler） -> pipeline -> store 更新状态
+
+### 5.2 order_pipeline（订单闭环）
+
+包含 5 个子流程（与业务需求对齐）：
+1. 拉单（只落 `dscoOrderId`）
+2. 推单到领星（回源 DSCO 明细）
+3. 回 ACK（领星状态 -> DSCO acknowledge）
+4. 回传发货（候选筛选 + 权威取数）
+5. 回传发票（回源 DSCO 明细 -> DSCO invoice）
+
+### 5.3 stock_pipeline（库存闭环）
+
+1. 领星库存明细（`product_valid_num`）
+2. 应用映射注入
+3. 回传 DSCO `inventory/singleItem`
+
+## 6. 任务（job）如何落地（`internal/platform/scheduler`）
+
+> 一期推荐：scheduler 只做定时触发，不做业务判断。
+
+建议定义 6 个 job（与业务需求一致）：
+- `pull_dsco_orders`
+- `push_orders_to_lx`
+- `ack_to_dsco`
+- `ship_to_dsco`
+- `invoice_to_dsco`
+- `sync_stock`
+
+每个 job 的实现只做三件事：
+1. 打点日志（job 开始/结束）
+2. 调对应 pipeline 的方法
+3. 记录错误并返回
+
+## 7. 字段取值与接口映射（落地说明）
+
+以下映射与口径以 `doc/一期系统设计（DSCO-领星自动化）.md` 的第 6 章为准，这里补充“代码落点”。
+
+### 7.1 推单到领星（`internal/lingxing/order/mapper_from_dsco.go`）
+
+- 输入：DSCO `OrderService.GetByKey(orderKey=dscoOrderId,value=dscoOrderId)` 返回的 `dsco.Order`
+- 输出：领星 `lingxing.CreateOrdersV2Request`
+- 缺字段策略：缺必填直接写 `manual_task(bad_payload)`，并把 `pushed_to_lx_status=3`
+
+### 7.2 回 ACK（`internal/lingxing/order/service.go` + `internal/sync/order_pipeline.go`）
+
+- 候选：领星 `OrderService.ListOrdersV2(order_status=5)`
+- `dscoOrderId` 获取：从响应里提取 `platform_order_no`（一期推单写入）
+- 回传：DSCO `OrderService.Acknowledge(type=DSCO_ORDER_ID,id=dscoOrderId)`
+
+### 7.3 回传发货（`internal/lingxing/outbound/service.go`）
+
+- 候选筛选：领星 `OrderService.ListOrdersV2(order_status=6)`
+- 权威取数：领星 `WarehouseService.WmsOrderList(status_arr=[3])`
+- 取数映射：
+  - `tracking_no` -> DSCO `trackingNumber`
+  - `product_info[].sku/count` -> DSCO `shipment.lineItems`
+  - `delivered_at` -> DSCO `shipDate`（需转换 ISO8601）
+- 一期强约束：同一 `dscoOrderId` 多个 `tracking_no` -> `manual_task(multi_shipment)` + `shipped_to_dsco_status=3`
+
+### 7.4 回传发票（`internal/sync/order_pipeline.go`）
+
+- 回源 DSCO 订单 -> 生成 DSCO invoice：
+  - `invoiceId = INV-<dscoOrderId>`
+  - `lineItems` 从 DSCO order `lineItems` 生成（`unitPrice` 缺失转人工）
+  - `totalAmount = sum(quantity*unitPrice)`（一期最小口径）
+
+### 7.5 库存同步（`internal/lingxing/inventory/service.go`）
+
+- 领星库存：`InventoryDetailsItem.product_valid_num` 为可用量
+- DSCO 回传：`InventoryService.UpsertSingle()`（`warehouses[].quantity`）
+- 缺映射：
+  - 无仓库映射：写 `manual_task(missing_mapping)`，跳过该条
+
+## 8. 重试与人工处理（`internal/platform/retry` + `store/manual_task`）
+
+### 8.1 可重试
+
+- 网络/超时、HTTP 429/5xx
+- 领星签名时间窗导致的偶发失败（重试会换 timestamp）
+
+### 8.2 不可重试 -> 转人工
+
+- 缺必填字段（无法组装目标请求）
+- 仓库/SKU 映射缺失
+- 一单多包裹（一期策略）
+
+## 9. 测试策略（确保能落地）
+
+### 9.1 SDK 层
+
+已在 `golib/v2/sdk/dsco`、`golib/v2/sdk/lingxing` 用 `httptest` 覆盖一期必用接口（断言 path/query/body）。
+
+### 9.2 领域层与 pipeline 层
+
+建议优先覆盖三类测试：
+- 正常路径：状态从 0/2 -> 1
+- 边界：缺字段/缺映射 -> `manual_task` + 状态=人工
+- 异常：外部 429/5xx -> 重试后成功/失败
+
+说明：
+- 一期如果只有 MySQL 一个实现，不要为了“解耦”引入 interface；直接用 store + 集成测试更直白。
+
+## 10. 开发注意事项（一期必须遵守）
+
+### 10.1 最小存储红线
+
+- 禁止把 DSCO 订单原文、领星订单/出库单原文持久化到 DB（除非进入 `manual_task.payload`，且必须脱敏、且只存排障最小上下文）。
+- 运行时需要业务明细，一律按 `dscoOrderId` 回源 DSCO/领星取数；系统只保存处理状态与幂等信息。
+
+### 10.2 幂等与重复运行
+
+- 所有 job/pipeline 必须可重复运行，且不会产生重复副作用：
+  - 推单成功后再次运行不重复创建订单（依赖 `sync_order_state` + 领星 `platform_order_no=dscoOrderId`）。
+  - ACK/发货/发票回传成功后再次运行直接跳过。
+- 对外调用前先查本地状态；对外调用成功后再更新状态（失败写 `last_error`）。
+
+### 10.3 时间与格式
+
+- DSCO `until` 需要在“过去至少 5 秒”，拉单 job 必须统一做时间保护。
+- 领星 `delivered_at` 等字符串时间回传 DSCO 前必须转 ISO8601；无法转换直接转人工，禁止硬凑。
+- 统一时区策略：推荐内部用 UTC（DB DATETIME(3)），展示再转换。
+
+### 10.4 领星签名/限流
+
+- 所有领星业务接口请求 URL 上只能带 `access_token/app_key/timestamp/sign` 四个公共参数（SDK 已控制；业务代码不要额外拼 query）。
+- 注意接口令牌桶容量（例如 `inventoryDetails`=1），必须控制调用频率与分页策略，避免无意义重试打爆限流。
+
+### 10.5 多包裹与人工处理
+
+- 一期强约束：一单只回传一个 `tracking_no`。
+- 检测到同一 `dscoOrderId` 多个出库单/多个 `tracking_no`：
+  - 写 `manual_task(task_type=multi_shipment)`，`shipped_to_dsco_status=3`，停止自动回传。
+
+### 10.6 映射缺失策略（仓库/SKU）
+
+- 仓库映射缺失：写 `manual_task(task_type=missing_mapping)`，跳过该条库存更新，不影响整体任务推进。
+- SKU 映射缺失：若两边 SKU 本就一致可直接使用原 SKU；若业务要求必须映射，则转人工。
+- 映射配置变更需可热更新吗：一期不做热更新，重启生效即可。
+
+### 10.7 错误分类与重试上限
+
+- 只对“确定可恢复”的错误重试：网络/超时/429/5xx。
+- 明确不可恢复错误直接转人工：字段缺失、参数错误、映射缺失、多包裹。
+- 每个流程必须有最大重试次数与退避策略，超过阈值进入人工处理，避免无限重试。
+
+### 10.8 日志脱敏与排障
+
+- 日志必须脱敏：token、地址电话、邮箱等敏感字段不落日志或打码。
+- 每条关键日志必须带 `dscoOrderId`（或在拉单阶段至少带 scrollId/时间窗）方便串联排查。
+- `manual_task.payload` 只存“排障最小必要字段”，且必须脱敏。
+
+### 10.9 公共工具方法复用约束（golib/library -> golib/v2）
+
+- 开发中如需公共方法/工具方法：
+  - 先查 `golib/library` 是否已有实现；
+  - 若有但杂乱：提炼并迁移到 `golib/v2`（保持简单、可测试、中文注释）；
+  - 业务代码统一只依赖 `golib/v2`，禁止新增对 `golib/library` 的直接依赖。
+
+## 11. 开发步骤（按顺序落地，一期最小可交付）
+
+> 原则：先把“可跑通的最小闭环”做出来，再补并发、补观测、补细节；每一步都能独立验收。
+
+### 11.1 Step 0：工程初始化与约束落地
+
+- 新增 `cmd/ipass/main.go`：只做配置加载、DB 初始化、SDK 初始化、启动 scheduler。
+- 新增 `migrations/0001_init.sql`：直接复用系统设计建表 SQL。
+- 明确统一编码 UTF-8，避免中文乱码；新增文件均使用 UTF-8。
+
+验收：
+- 程序可启动并优雅退出（收到信号后停止 scheduler、关闭 DB）。
+
+### 11.2 Step 1：platform/db + store（最小状态库可用）
+
+- 实现 `internal/platform/db/db.go`：MySQL 连接、Ping、Close。
+- 实现 `internal/store/*`：
+  - `sync_order_state`：upsert、按状态分页拉取、更新状态/错误
+  - `job_watermark`：读写 JSON 水位
+  - `manual_task`：写入与简单查询
+
+验收：
+- 可在本地 MySQL 创建表并写入/查询一条 `sync_order_state`。
+
+### 11.3 Step 2：scheduler（最小定时触发器）
+
+- 实现 `internal/platform/scheduler/scheduler.go`：ticker 驱动（一期足够）。
+- 支持：任务开关、运行间隔、并发保护（同一 job 未结束不重复启动）。
+
+验收：
+- 能每 N 秒打印一次 job 心跳日志，停止后不再触发。
+
+### 11.4 Step 3：拉单 pipeline（只落 dscoOrderId）
+
+- 实现 `internal/integrations/dsco`：封装 `GetPage()` 调用。
+- 实现 `internal/sync/order_pipeline.go` 的 `PullOrders()`：
+  - 读水位 -> DSCO `/order/page` -> upsert `sync_order_state`
+  - 正确处理 scrollId 翻页
+  - 正确推进水位（直到成功才推进）
+
+验收：
+- 打开 `pull_dsco_orders`，能持续把新 `dscoOrderId` 写入状态表。
+
+### 11.5 Step 4：推单到领星（回源 DSCO 明细）
+
+- 实现 `internal/lingxing/order/mapper_from_dsco.go`：
+  - DSCO Order -> 领星 CreateOrdersV2 请求（一期必填字段）
+  - 缺字段直接写 `manual_task(bad_payload)` 并转人工
+- 实现 `internal/sync/order_pipeline.go` 的 `PushOrdersToLingXing()`：
+  - 抢占待推送记录 -> 回源 DSCO `/order/` -> 调领星 `/pb/mp/order/v2/create`
+  - 成功写 `lingxing_global_order_no` + `pushed_to_lx_status=1`
+
+验收：
+- 对同一 `dscoOrderId` 重跑不重复创建（本地状态+领星平台单号唯一约束）。
+
+### 11.6 Step 5：ACK 回传（领星待发货 -> DSCO acknowledge）
+
+- 实现 `internal/integrations/lingxing`：封装 `ListOrdersV2(order_status=5)`。
+- 实现 `internal/sync/order_pipeline.go` 的 `AckToDSCO()`：
+  - 从领星订单列表提取 `platform_order_no` 作为 `dscoOrderId`
+  - 过滤未 ACK 的订单 -> DSCO `Acknowledge()`
+
+验收：
+- `acked_to_dsco_status` 能从 0/2 走到 1，失败可重试。
+
+### 11.7 Step 6：发货回传（候选筛选 + 权威取数）
+
+- 实现 `internal/sync/order_pipeline.go` 的 `ShipToDSCO()`：
+  - 候选：领星 `order_status=6`
+  - 权威：领星 `wmsOrderList(status_arr=[3])`
+  - 生成 DSCO `singleShipment` 请求并回传
+  - 多包裹：写 `manual_task(multi_shipment)` 并置人工
+
+验收：
+- 已发货订单可回传 DSCO，且同单只回传一次。
+
+### 11.8 Step 7：发票回传（按 DSCO 必填最小集）
+
+- 实现 `internal/sync/order_pipeline.go` 的 `InvoiceToDSCO()`：
+  - 回源 DSCO 订单
+  - 生成 invoice：`invoiceId=INV-<dscoOrderId>`，`totalAmount=sum(qty*unitPrice)`
+  - 调 DSCO `/invoice`
+
+验收：
+- 发票成功回传，重复运行不重复创建（按本地状态控制）。
+
+### 11.9 Step 8：库存同步（可用库存）
+
+- 实现 `internal/lingxing/inventory/service.go`：
+  - 领星 `product_valid_num` 作为可用库存
+  - 应用仓库/SKU 映射注入
+- 实现 `internal/sync/stock_pipeline.go`：
+  - 分页拉取库存 -> DSCO `inventory/singleItem`
+  - 缺映射写 `manual_task(missing_mapping)` 并跳过
+
+验收：
+- 指定仓库可把可用库存同步到 DSCO。
+
+### 11.10 Step 9：可观测性与运维工具（一期最小集）
+
+- 日志：统一结构化字段（`dscoOrderId`、jobName、requestId、错误类型）。
+- 指标/告警：先最小化（成功/失败/积压数）。
+- （可选）HTTP 管理端：
+  - `/healthz`
+  - `/admin/run?job=...`
+  - `/admin/manual_tasks`
+
+验收：
+- 线上排障能定位到具体 `dscoOrderId` 的失败原因与重试次数。
