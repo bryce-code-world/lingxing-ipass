@@ -10,7 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"example.com/lingxing/golib/v2/tool/logger"
-	"lingxingipass/internal/store"
+	"lingxingipass/admin/store"
 )
 
 func (s *Server) uiLoginGet(c *gin.Context) {
@@ -58,9 +58,13 @@ func (s *Server) uiDashboard(c *gin.Context) {
 		c.HTML(http.StatusInternalServerError, "error.html", gin.H{"title": "错误", "error": err.Error()})
 		return
 	}
-	jobs := make([]string, 0, len(s.runners))
-	for k := range s.runners {
-		jobs = append(jobs, k)
+	jobs := []string{
+		"pull_dsco_orders",
+		"push_orders_to_lingxing",
+		"ack_to_dsco",
+		"ship_to_dsco",
+		"invoice_to_dsco",
+		"sync_stock",
 	}
 	sort.Strings(jobs)
 
@@ -187,9 +191,13 @@ func (s *Server) uiWatermarks(c *gin.Context) {
 }
 
 func (s *Server) uiJobs(c *gin.Context) {
-	jobs := make([]string, 0, len(s.runners))
-	for k := range s.runners {
-		jobs = append(jobs, k)
+	jobs := []string{
+		"pull_dsco_orders",
+		"push_orders_to_lingxing",
+		"ack_to_dsco",
+		"ship_to_dsco",
+		"invoice_to_dsco",
+		"sync_stock",
 	}
 	sort.Strings(jobs)
 	c.HTML(http.StatusOK, "jobs.html", gin.H{
@@ -227,4 +235,3 @@ func optionalIntPtr(raw string) *int {
 	}
 	return &n
 }
-

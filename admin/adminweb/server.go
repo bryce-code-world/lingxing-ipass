@@ -1,7 +1,6 @@
 package adminweb
 
 import (
-	"context"
 	"errors"
 	"html/template"
 	"net/http"
@@ -10,31 +9,31 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"example.com/lingxing/golib/v2/tool/logger"
-	"lingxingipass/internal/store"
+	"lingxingipass/admin/store"
 )
-
-// JobRunner 用于手动触发任务（同步执行一次）。
-type JobRunner func(ctx context.Context) error
 
 type Options struct {
 	AdminPassword string
+
+	OpsBaseURL  string
+	OpsPassword string
 
 	Watermark *store.WatermarkStore
 	Manual    *store.ManualTaskStore
 	Order     *store.OrderStateStore
 
-	Runners map[string]JobRunner
 	Now     func() time.Time
 }
 
 type Server struct {
 	adminPassword string
+	opsBaseURL    string
+	opsPassword   string
 	now           func() time.Time
 
 	watermark *store.WatermarkStore
 	manual    *store.ManualTaskStore
 	order     *store.OrderStateStore
-	runners   map[string]JobRunner
 
 	engine *gin.Engine
 }
@@ -49,20 +48,18 @@ func NewServer(opt Options) http.Handler {
 	if opt.Order == nil {
 		panic("Order 不能为 nil")
 	}
-	if opt.Runners == nil {
-		opt.Runners = map[string]JobRunner{}
-	}
 	if opt.Now == nil {
 		opt.Now = time.Now
 	}
 
 	s := &Server{
 		adminPassword: opt.AdminPassword,
+		opsBaseURL:    opt.OpsBaseURL,
+		opsPassword:   opt.OpsPassword,
 		now:           opt.Now,
 		watermark:     opt.Watermark,
 		manual:        opt.Manual,
 		order:         opt.Order,
-		runners:       opt.Runners,
 	}
 
 	s.engine = gin.New()
@@ -92,6 +89,7 @@ func (s *Server) traceMiddleware() gin.HandlerFunc {
 		}
 		ctx := logger.WithTraceID(c.Request.Context(), traceID)
 		c.Request = c.Request.WithContext(ctx)
+		c.Request.Header.Set("X-Trace-Id", traceID)
 		c.Header("X-Trace-Id", traceID)
 		c.Next()
 	}
@@ -144,14 +142,6 @@ func (s *Server) getAdminPassword() string {
 	return s.adminPassword
 }
 
-func (s *Server) mustRunner(job string) (JobRunner, bool) {
-	if s.runners == nil {
-		return nil, false
-	}
-	fn, ok := s.runners[job]
-	return fn, ok
-}
-
 func mustJSONBody(c *gin.Context, maxBytes int64) ([]byte, error) {
 	if maxBytes <= 0 {
 		maxBytes = 1 << 20
@@ -171,4 +161,3 @@ func mustJSONBody(c *gin.Context, maxBytes int64) ([]byte, error) {
 	}
 	return body, nil
 }
-

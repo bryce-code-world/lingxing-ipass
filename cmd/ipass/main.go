@@ -13,9 +13,10 @@ import (
 	"example.com/lingxing/golib/v2/sdk/dsco"
 	"example.com/lingxing/golib/v2/sdk/lingxing"
 	"example.com/lingxing/golib/v2/tool/logger"
-	"lingxingipass/admin/adminweb"
+	"lingxingipass/internal/platform/adminhttp"
 	"lingxingipass/internal/platform/config"
 	"lingxingipass/internal/platform/db"
+	"lingxingipass/internal/platform/opshttp"
 	"lingxingipass/internal/platform/scheduler"
 	"lingxingipass/internal/store"
 	"lingxingipass/internal/sync"
@@ -73,7 +74,7 @@ func main() {
 		log.Fatalf("初始化 DscoOrderRawStore 失败: %v", err)
 	}
 
-	runners := map[string]adminweb.JobRunner{}
+	runners := map[string]adminhttp.JobRunner{}
 
 	needDSCO := cfg.System.Jobs.PullDSCOOrdersEnable || cfg.System.Jobs.PushOrdersToLingXingEnable || cfg.System.Jobs.AckToDSCOEnable || cfg.System.Jobs.ShipToDSCOEnable || cfg.System.Jobs.InvoiceToDSCOEnable || cfg.System.Jobs.SyncStockEnable
 	needLingXing := cfg.System.Jobs.PushOrdersToLingXingEnable || cfg.System.Jobs.AckToDSCOEnable || cfg.System.Jobs.ShipToDSCOEnable || cfg.System.Jobs.SyncStockEnable
@@ -166,20 +167,17 @@ func main() {
 
 	// HTTP 管理端：始终可用（用于改水位/查人工任务/手动跑一次任务）
 	if cfg.System.HTTP.Enable {
-		h := adminweb.NewServer(adminweb.Options{
-			AdminPassword: cfg.System.Admin.Password,
-			Watermark:     watermark,
-			Manual:        manual,
-			Order:         orderState,
-			Runners:       runners,
-			Now:           time.Now,
-		})
+		h, err := adminhttp.NewHandler(watermark, manual, orderState, runners)
+		if err != nil {
+			log.Fatalf("初始化 ops handler 失败: %v", err)
+		}
+		authed := opshttp.Wrap(h, cfg.System.Ops.Password)
 
-		srv := &http.Server{Addr: cfg.System.HTTP.Addr, Handler: h}
+		srv := &http.Server{Addr: cfg.System.HTTP.Addr, Handler: authed}
 		go func() {
-			logger.Info(ctx, "http_start", "addr", cfg.System.HTTP.Addr)
+			logger.Info(ctx, "ops_http_start", "addr", cfg.System.HTTP.Addr)
 			if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				logger.Error(ctx, "http_error", "err", err.Error())
+				logger.Error(ctx, "ops_http_error", "err", err.Error())
 				stop()
 			}
 		}()

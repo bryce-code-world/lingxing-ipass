@@ -1,14 +1,18 @@
 package adminweb
 
 import (
+	"bytes"
+	"errors"
+	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
 	"example.com/lingxing/golib/v2/tool/logger"
-	"lingxingipass/internal/store"
+	"lingxingipass/admin/store"
 )
 
 func (s *Server) apiRunJob(c *gin.Context) {
@@ -17,15 +21,10 @@ func (s *Server) apiRunJob(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "missing job"})
 		return
 	}
-	fn, ok := s.mustRunner(job)
-	if !ok {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "unknown job"})
-		return
-	}
 
 	start := time.Now()
 	logger.Info(c.Request.Context(), "admin_run_start", "job", job)
-	err := fn(c.Request.Context())
+	err := s.callOpsRun(c, job)
 	cost := time.Since(start).Milliseconds()
 	if err != nil {
 		logger.Error(c.Request.Context(), "admin_run_end", "job", job, "cost_ms", cost, "err", err.Error())
@@ -34,6 +33,42 @@ func (s *Server) apiRunJob(c *gin.Context) {
 	}
 	logger.Info(c.Request.Context(), "admin_run_end", "job", job, "cost_ms", cost)
 	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+func (s *Server) callOpsRun(c *gin.Context, job string) error {
+	base := strings.TrimRight(strings.TrimSpace(s.opsBaseURL), "/")
+	if base == "" {
+		return errors.New("未配置 ADMIN_OPS_BASE_URL")
+	}
+	pass := strings.TrimSpace(s.opsPassword)
+	if pass == "" {
+		return errors.New("未配置 ADMIN_OPS_PASSWORD")
+	}
+
+	u := base + "/admin/run?job=" + url.QueryEscape(job)
+	req, err := http.NewRequestWithContext(c.Request.Context(), http.MethodPost, u, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("X-Ops-Password", pass)
+	if traceID := strings.TrimSpace(c.Request.Header.Get("X-Trace-Id")); traceID != "" {
+		req.Header.Set("X-Trace-Id", traceID)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return nil
+	}
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
+	body = bytes.TrimSpace(body)
+	if len(body) == 0 {
+		return errors.New("ops 调用失败: status=" + resp.Status)
+	}
+	return errors.New("ops 调用失败: status=" + resp.Status + ", body=" + string(body))
 }
 
 func (s *Server) apiWatermarkGet(c *gin.Context) {

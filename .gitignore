@@ -3,3 +3,4 @@ logs/
 **/logs/
 *.log
 .env
+.env.admin

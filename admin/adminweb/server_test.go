@@ -9,7 +9,7 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 
-	"lingxingipass/internal/store"
+	"lingxingipass/admin/store"
 )
 
 func TestAdminWeb_UI_LoginAndSessionCookie_Behavior(t *testing.T) {
@@ -27,10 +27,11 @@ func TestAdminWeb_UI_LoginAndSessionCookie_Behavior(t *testing.T) {
 
 	h := NewServer(Options{
 		AdminPassword: "p1",
+		OpsBaseURL:    "http://127.0.0.1:18080",
+		OpsPassword:   "opsp1",
 		Watermark:     wm,
 		Manual:        manual,
 		Order:         order,
-		Runners:       map[string]JobRunner{},
 		Now:           func() time.Time { return time.Unix(1720429074, 0).UTC() },
 	})
 
@@ -80,10 +81,11 @@ func TestAdminWeb_API_AuthByHeader_Behavior(t *testing.T) {
 
 	h := NewServer(Options{
 		AdminPassword: "p1",
+		OpsBaseURL:    "http://127.0.0.1:18080",
+		OpsPassword:   "opsp1",
 		Watermark:     wm,
 		Manual:        manual,
 		Order:         order,
-		Runners:       map[string]JobRunner{},
 		Now:           func() time.Time { return time.Unix(1720429074, 0).UTC() },
 	})
 
@@ -112,4 +114,3 @@ func TestAdminWeb_API_AuthByHeader_Behavior(t *testing.T) {
 		t.Fatalf("expectations err=%v", err)
 	}
 }
-

@@ -124,9 +124,10 @@ IPASS_SHIP_DATE_SOURCE="delivered_at"
 在项目根目录执行：
 - `go run ./cmd/ipass/main.go`
 
-## HTTP 管理端（一期最小运维面）
+## 业务进程 Ops HTTP（一期最小运维面）
 
 启用条件：`IPASS_HTTP_ENABLE=true`，默认监听 `IPASS_HTTP_ADDR=":8080"`。
+鉴权：必须配置 `IPASS_OPS_PASSWORD`，调用时携带请求头 `X-Ops-Password: <IPASS_OPS_PASSWORD>`。
 
 接口清单：
 - `GET /healthz`：健康检查
@@ -138,13 +139,13 @@ IPASS_SHIP_DATE_SOURCE="delivered_at"
 - `GET /admin/manual_tasks?status=0&limit=50&offset=0`：查看人工任务队列
 
 认证：
-- 如果配置了 `IPASS_ADMIN_PASSWORD`，访问上述 `/admin/*` 接口需要提供认证：
-  - 浏览器：先访问 `GET /admin/ui/login` 登录（session cookie）
-  - 脚本/命令行：请求头携带 `X-Admin-Password: <IPASS_ADMIN_PASSWORD>`
+- 业务进程的 `/admin/*` 属于 ops 接口：请求头必须携带 `X-Ops-Password: <IPASS_OPS_PASSWORD>`
 
-## Admin 管理后台（可视化）
+## Admin 管理后台（可视化，独立进程）
 
-定位：用于运维与排障，不承载业务主流程；页面只读取本系统数据库并调用本系统管理 API。
+定位：用于运维与排障，不承载业务主流程；**与业务进程完全分离**：
+- Admin 自己读取数据库（独立 DB 连接与独立 store）
+- Admin 触发任务时，通过 HTTP 调用业务进程 ops（不会直接 import 业务 pipeline）
 
 入口：
 - 登录页：`GET /admin/ui/login`
@@ -156,10 +157,24 @@ IPASS_SHIP_DATE_SOURCE="delivered_at"
 
 认证口径：
 - “每次打开浏览器/新会话登录一次”：登录成功后写入 session cookie（浏览器关闭即失效）
-- 命令行/脚本访问 JSON API：请求头 `X-Admin-Password`（便于 curl/自动化）
+- 命令行/脚本访问 Admin 的 JSON API：请求头 `X-Admin-Password: <ADMIN_PASSWORD>`
 
-代码位置（与业务代码分离）：
-- `admin/adminweb/`：Admin UI + Admin API + 鉴权与静态资源（Gin + `html/template`）
+启动方式（两进程）：
+- 业务进程：`go run ./cmd/ipass/main.go`（提供闭环调度 + ops HTTP）
+- admin 进程：`go run ./cmd/admin/main.go`（提供可视化后台）
+
+admin 配置：
+- 参考：`.env.admin.example`
+- 默认加载：根目录 `.env.admin`（不覆盖已存在的 env）
+  - `ADMIN_DB_DSN`：admin 连接数据库 DSN
+  - `ADMIN_HTTP_ADDR`：admin 监听地址（默认 `:8081`）
+  - `ADMIN_PASSWORD`：admin 登录/鉴权密码
+  - `ADMIN_OPS_BASE_URL`：业务 ops 地址（例如 `http://127.0.0.1:8080`）
+  - `ADMIN_OPS_PASSWORD`：调用业务 ops 的密码（请求头 `X-Ops-Password`）
+
+代码位置：
+- `admin/adminweb/`：Admin UI + Admin API（Gin + `html/template`）
+- `admin/store/`：Admin 独立 DB 读写（不复用业务侧 `internal/store`）
 
 一期 job 名称：
 - `pull_dsco_orders`

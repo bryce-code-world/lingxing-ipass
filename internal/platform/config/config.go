@@ -30,6 +30,10 @@ type SystemConfig struct {
 		Enable bool
 		Addr   string
 	}
+	Ops struct {
+		// Password 用于业务进程 ops 接口鉴权（admin 将通过请求头 X-Ops-Password 调用）。
+		Password string
+	}
 	Admin struct {
 		// Password 用于管理后台访问控制（一期最小：单密码）。
 		Password string
@@ -117,6 +121,11 @@ func LoadFromEnv() (Config, error) {
 	cfg.System.HTTP.Addr = strings.TrimSpace(os.Getenv("IPASS_HTTP_ADDR"))
 	if cfg.System.HTTP.Addr == "" {
 		cfg.System.HTTP.Addr = ":8080"
+	}
+
+	cfg.System.Ops.Password = strings.TrimSpace(os.Getenv("IPASS_OPS_PASSWORD"))
+	if cfg.System.HTTP.Enable && cfg.System.Ops.Password == "" {
+		return Config{}, errors.New("开启业务 ops HTTP 时，必须配置 IPASS_OPS_PASSWORD")
 	}
 
 	cfg.System.Admin.Password = strings.TrimSpace(os.Getenv("IPASS_ADMIN_PASSWORD"))
