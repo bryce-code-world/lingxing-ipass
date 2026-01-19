@@ -2,19 +2,20 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"strings"
 	"time"
+
+	"gorm.io/gorm"
 )
 
-// ManualTaskStore 负责 manual_task 的写入。
+// ManualTaskStore 负责 manual_task 的写入（基于 GORM）。
 type ManualTaskStore struct {
-	db *sql.DB
+	db *gorm.DB
 }
 
-func NewManualTaskStore(db *sql.DB) (*ManualTaskStore, error) {
+func NewManualTaskStore(db *gorm.DB) (*ManualTaskStore, error) {
 	if db == nil {
 		return nil, errors.New("db 不能为空")
 	}
@@ -37,21 +38,28 @@ func (s *ManualTaskStore) Create(ctx context.Context, task ManualTask) error {
 	if len(task.Payload) == 0 {
 		task.Payload = []byte(`{}`)
 	}
-	_, err := s.db.ExecContext(ctx, `
+
+	var dscoOrderID any
+	if task.DscoOrderID == "" {
+		dscoOrderID = nil
+	} else {
+		dscoOrderID = task.DscoOrderID
+	}
+
+	return s.db.WithContext(ctx).Exec(`
 INSERT INTO manual_task (task_type, dsco_order_id, payload, status)
 VALUES (?, ?, ?, 0)
-`, task.TaskType, sql.NullString{String: task.DscoOrderID, Valid: task.DscoOrderID != ""}, []byte(task.Payload))
-	return err
+`, task.TaskType, dscoOrderID, []byte(task.Payload)).Error
 }
 
 type ManualTaskRow struct {
-	ID          int64
-	TaskType    string
-	DscoOrderID sql.NullString
-	Payload     json.RawMessage
-	Status      int
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	ID          int64           `json:"id"`
+	TaskType    string          `json:"task_type"`
+	DscoOrderID *string         `json:"dsco_order_id,omitempty"`
+	Payload     json.RawMessage `json:"payload"`
+	Status      int             `json:"status"`
+	CreatedAt   time.Time       `json:"created_at"`
+	UpdatedAt   time.Time       `json:"updated_at"`
 }
 
 // ListByStatus 查询人工任务列表（一期：只做最小分页）。
@@ -66,31 +74,27 @@ func (s *ManualTaskStore) ListByStatus(ctx context.Context, status int, limit in
 		offset = 0
 	}
 
-	rows, err := s.db.QueryContext(ctx, `
+	var out []ManualTaskRow
+	if err := s.db.WithContext(ctx).Raw(`
 SELECT id, task_type, dsco_order_id, payload, status, created_at, updated_at
 FROM manual_task
 WHERE status = ?
 ORDER BY id DESC
 LIMIT ? OFFSET ?
-`, status, limit, offset)
-	if err != nil {
+`, status, limit, offset).Scan(&out).Error; err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	var out []ManualTaskRow
-	for rows.Next() {
-		var r ManualTaskRow
-		var payload []byte
-		if err := rows.Scan(&r.ID, &r.TaskType, &r.DscoOrderID, &payload, &r.Status, &r.CreatedAt, &r.UpdatedAt); err != nil {
-			return nil, err
+	for i := range out {
+		out[i].TaskType = strings.TrimSpace(out[i].TaskType)
+		if out[i].DscoOrderID != nil {
+			v := strings.TrimSpace(*out[i].DscoOrderID)
+			if v == "" {
+				out[i].DscoOrderID = nil
+			} else {
+				out[i].DscoOrderID = &v
+			}
 		}
-		r.Payload = json.RawMessage(payload)
-		r.TaskType = strings.TrimSpace(r.TaskType)
-		out = append(out, r)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
 	}
 	return out, nil
 }
+

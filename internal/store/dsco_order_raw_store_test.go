@@ -11,13 +11,9 @@ import (
 func TestDscoOrderRawStore_UpsertLatest_Behavior(t *testing.T) {
 	t.Parallel()
 
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock.New err=%v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	gdb, mock := newMockGormDB(t)
 
-	s, err := NewDscoOrderRawStore(db)
+	s, err := NewDscoOrderRawStore(gdb)
 	if err != nil {
 		t.Fatalf("NewDscoOrderRawStore err=%v", err)
 	}

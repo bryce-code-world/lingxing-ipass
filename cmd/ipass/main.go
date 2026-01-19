@@ -13,7 +13,7 @@ import (
 	"example.com/lingxing/golib/v2/sdk/dsco"
 	"example.com/lingxing/golib/v2/sdk/lingxing"
 	"example.com/lingxing/golib/v2/tool/logger"
-	"lingxingipass/internal/platform/adminhttp"
+	"lingxingipass/admin/adminweb"
 	"lingxingipass/internal/platform/config"
 	"lingxingipass/internal/platform/db"
 	"lingxingipass/internal/platform/scheduler"
@@ -32,11 +32,13 @@ func main() {
 		log.Fatalf("加载配置失败: %v", err)
 	}
 
-	sqlDB, err := db.OpenMySQL(cfg.System.DB.DSN)
+	gdb, err := db.OpenMySQL(cfg.System.DB.DSN)
 	if err != nil {
 		log.Fatalf("连接数据库失败: %v", err)
 	}
-	defer sqlDB.Close()
+	if rawDB, err := gdb.DB(); err == nil {
+		defer rawDB.Close()
+	}
 
 	if err := logger.Init(logger.Config{Dir: cfg.System.Log.Dir, Stdout: true}); err != nil {
 		log.Fatalf("初始化日志失败: %v", err)
@@ -54,24 +56,24 @@ func main() {
 	})
 
 	// store 始终初始化：HTTP 管理端需要读写水位、查看人工任务。
-	orderState, err := store.NewOrderStateStore(sqlDB)
+	orderState, err := store.NewOrderStateStore(gdb)
 	if err != nil {
 		log.Fatalf("初始化 OrderStateStore 失败: %v", err)
 	}
-	watermark, err := store.NewWatermarkStore(sqlDB)
+	watermark, err := store.NewWatermarkStore(gdb)
 	if err != nil {
 		log.Fatalf("初始化 WatermarkStore 失败: %v", err)
 	}
-	manual, err := store.NewManualTaskStore(sqlDB)
+	manual, err := store.NewManualTaskStore(gdb)
 	if err != nil {
 		log.Fatalf("初始化 ManualTaskStore 失败: %v", err)
 	}
-	orderRaw, err := store.NewDscoOrderRawStore(sqlDB)
+	orderRaw, err := store.NewDscoOrderRawStore(gdb)
 	if err != nil {
 		log.Fatalf("初始化 DscoOrderRawStore 失败: %v", err)
 	}
 
-	runners := map[string]adminhttp.JobRunner{}
+	runners := map[string]adminweb.JobRunner{}
 
 	needDSCO := cfg.System.Jobs.PullDSCOOrdersEnable || cfg.System.Jobs.PushOrdersToLingXingEnable || cfg.System.Jobs.AckToDSCOEnable || cfg.System.Jobs.ShipToDSCOEnable || cfg.System.Jobs.InvoiceToDSCOEnable || cfg.System.Jobs.SyncStockEnable
 	needLingXing := cfg.System.Jobs.PushOrdersToLingXingEnable || cfg.System.Jobs.AckToDSCOEnable || cfg.System.Jobs.ShipToDSCOEnable || cfg.System.Jobs.SyncStockEnable
@@ -164,10 +166,14 @@ func main() {
 
 	// HTTP 管理端：始终可用（用于改水位/查人工任务/手动跑一次任务）
 	if cfg.System.HTTP.Enable {
-		h, err := adminhttp.NewHandler(watermark, manual, orderState, runners)
-		if err != nil {
-			log.Fatalf("初始化 HTTP 管理端失败: %v", err)
-		}
+		h := adminweb.NewServer(adminweb.Options{
+			AdminPassword: cfg.System.Admin.Password,
+			Watermark:     watermark,
+			Manual:        manual,
+			Order:         orderState,
+			Runners:       runners,
+			Now:           time.Now,
+		})
 
 		srv := &http.Server{Addr: cfg.System.HTTP.Addr, Handler: h}
 		go func() {

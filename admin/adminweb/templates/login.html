@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{.title}} - Admin</title>
+    <link rel="stylesheet" href="/admin/ui/static/admin.css">
+  </head>
+  <body>
+    <main class="container">
+      <div class="card" style="max-width:420px;margin:10vh auto;">
+        <h1 class="h1">后台登录</h1>
+        <p class="muted">请输入后台密码。</p>
+        {{if .error}}
+        <div class="alert">{{.error}}</div>
+        {{end}}
+        <form method="post" action="/admin/ui/login{{if .next}}?next={{.next}}{{end}}">
+          <label class="label" for="password">密码</label>
+          <input class="input" id="password" name="password" type="password" autocomplete="current-password" autofocus>
+          <button class="btn" type="submit" style="margin-top:12px;width:100%;">登录</button>
+        </form>
+      </div>
+    </main>
+  </body>
+</html>
+

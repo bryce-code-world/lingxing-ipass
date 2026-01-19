@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"testing"
 	"time"
 
@@ -12,13 +11,9 @@ import (
 func TestManualTaskStore_Create_Behavior(t *testing.T) {
 	t.Parallel()
 
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock.New err=%v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	gdb, mock := newMockGormDB(t)
 
-	s, err := NewManualTaskStore(db)
+	s, err := NewManualTaskStore(gdb)
 	if err != nil {
 		t.Fatalf("NewManualTaskStore err=%v", err)
 	}
@@ -41,13 +36,9 @@ func TestManualTaskStore_Create_Behavior(t *testing.T) {
 func TestManualTaskStore_ListByStatus_Behavior(t *testing.T) {
 	t.Parallel()
 
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock.New err=%v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	gdb, mock := newMockGormDB(t)
 
-	s, err := NewManualTaskStore(db)
+	s, err := NewManualTaskStore(gdb)
 	if err != nil {
 		t.Fatalf("NewManualTaskStore err=%v", err)
 	}
@@ -56,7 +47,7 @@ func TestManualTaskStore_ListByStatus_Behavior(t *testing.T) {
 	mock.ExpectQuery("SELECT id, task_type, dsco_order_id, payload, status, created_at, updated_at").
 		WithArgs(0, 50, 0).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "task_type", "dsco_order_id", "payload", "status", "created_at", "updated_at"}).
-			AddRow(int64(1), "bad_payload", sql.NullString{String: "d1", Valid: true}, []byte(`{"a":1}`), 0, now, now))
+			AddRow(int64(1), "bad_payload", "d1", []byte(`{"a":1}`), 0, now, now))
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	t.Cleanup(cancel)
@@ -65,7 +56,7 @@ func TestManualTaskStore_ListByStatus_Behavior(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListByStatus err=%v", err)
 	}
-	if len(rows) != 1 || rows[0].ID != 1 || rows[0].TaskType != "bad_payload" || rows[0].DscoOrderID.String != "d1" {
+	if len(rows) != 1 || rows[0].ID != 1 || rows[0].TaskType != "bad_payload" || rows[0].DscoOrderID == nil || *rows[0].DscoOrderID != "d1" {
 		t.Fatalf("rows=%+v", rows)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {

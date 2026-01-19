@@ -2,18 +2,20 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"strings"
+	"time"
+
+	"gorm.io/gorm"
 )
 
-// WatermarkStore 负责 job_watermark 的读写。
+// WatermarkStore 负责 job_watermark 的读写（基于 GORM）。
 type WatermarkStore struct {
-	db *sql.DB
+	db *gorm.DB
 }
 
-func NewWatermarkStore(db *sql.DB) (*WatermarkStore, error) {
+func NewWatermarkStore(db *gorm.DB) (*WatermarkStore, error) {
 	if db == nil {
 		return nil, errors.New("db 不能为空")
 	}
@@ -27,15 +29,20 @@ func (s *WatermarkStore) Get(ctx context.Context, jobName string) (json.RawMessa
 		return nil, false, errors.New("jobName 不能为空")
 	}
 
-	var raw []byte
-	err := s.db.QueryRowContext(ctx, `SELECT watermark FROM job_watermark WHERE job_name = ?`, jobName).Scan(&raw)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, false, nil
-		}
-		return nil, false, err
+	var row struct {
+		Watermark []byte `gorm:"column:watermark"`
 	}
-	return json.RawMessage(raw), true, nil
+	res := s.db.WithContext(ctx).Raw(`SELECT watermark FROM job_watermark WHERE job_name = ?`, jobName).Scan(&row)
+	if res.Error != nil {
+		return nil, false, res.Error
+	}
+	if res.RowsAffected == 0 {
+		return nil, false, nil
+	}
+	if len(row.Watermark) == 0 {
+		return nil, false, nil
+	}
+	return json.RawMessage(row.Watermark), true, nil
 }
 
 // Set 写入任务水位（upsert）。
@@ -48,10 +55,27 @@ func (s *WatermarkStore) Set(ctx context.Context, jobName string, watermark json
 		return errors.New("watermark 不能为空")
 	}
 
-	_, err := s.db.ExecContext(ctx, `
+	return s.db.WithContext(ctx).Exec(`
 INSERT INTO job_watermark (job_name, watermark)
 VALUES (?, ?)
 ON DUPLICATE KEY UPDATE watermark = VALUES(watermark)
-`, jobName, []byte(watermark))
-	return err
+`, jobName, []byte(watermark)).Error
+}
+
+type JobWatermarkRow struct {
+	JobName   string          `json:"job_name"`
+	Watermark json.RawMessage `json:"watermark"`
+	UpdatedAt time.Time       `json:"updated_at"`
+}
+
+// ListAll 列出所有任务水位（一期用于管理后台展示）。
+func (s *WatermarkStore) ListAll(ctx context.Context) ([]JobWatermarkRow, error) {
+	var rows []JobWatermarkRow
+	if err := s.db.WithContext(ctx).Raw(`SELECT job_name, watermark, updated_at FROM job_watermark ORDER BY job_name ASC`).Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	for i := range rows {
+		rows[i].JobName = strings.TrimSpace(rows[i].JobName)
+	}
+	return rows, nil
 }

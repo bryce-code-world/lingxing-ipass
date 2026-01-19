@@ -9,8 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/DATA-DOG/go-sqlmock"
-
 	"example.com/lingxing/golib/v2/sdk/dsco"
 	"example.com/lingxing/golib/v2/sdk/lingxing"
 	"lingxingipass/internal/store"
@@ -19,7 +17,7 @@ import (
 func TestStockPipeline_SyncStock_Behavior(t *testing.T) {
 	t.Parallel()
 
-	// DSCO mock：inventory/singleItem
+	// DSCO mock：POST /inventory/singleItem
 	var upsertCalls int
 	dscoSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -52,7 +50,7 @@ func TestStockPipeline_SyncStock_Behavior(t *testing.T) {
 		t.Fatalf("dsco.New err=%v", err)
 	}
 
-	// 领星 mock：inventoryDetails
+	// 领星 mock：POST /inventoryDetails
 	now := func() time.Time { return time.Unix(1720429074, 0) }
 	lxSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -85,12 +83,8 @@ func TestStockPipeline_SyncStock_Behavior(t *testing.T) {
 		t.Fatalf("lingxing.New err=%v", err)
 	}
 
-	db, _, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock.New err=%v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	manual, err := store.NewManualTaskStore(db)
+	gdb, _ := newMockGormDB(t)
+	manual, err := store.NewManualTaskStore(gdb)
 	if err != nil {
 		t.Fatalf("NewManualTaskStore err=%v", err)
 	}
@@ -110,3 +104,4 @@ func TestStockPipeline_SyncStock_Behavior(t *testing.T) {
 		t.Fatalf("upsertCalls=%d want=1", upsertCalls)
 	}
 }
+

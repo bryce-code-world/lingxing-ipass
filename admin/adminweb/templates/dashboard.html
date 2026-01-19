@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{.title}} - Admin</title>
+    <link rel="stylesheet" href="/admin/ui/static/admin.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <div class="brand">iPass Admin</div>
+        <nav class="nav">
+          <a href="/admin/ui/">总览</a>
+          <a href="/admin/ui/orders">订单</a>
+          <a href="/admin/ui/manual_tasks">人工</a>
+          <a href="/admin/ui/watermarks">水位</a>
+          <a href="/admin/ui/jobs">任务</a>
+        </nav>
+        <form class="logout" method="post" action="/admin/ui/logout">
+          <button class="btn btn-ghost" type="submit">退出</button>
+        </form>
+      </div>
+    </header>
+    <main class="container">
+      <h1 class="h1">总览</h1>
+
+      <div class="grid">
+        <div class="card">
+          <div class="card-title">快捷入口</div>
+          <div class="chips">
+            <a class="chip" href="/admin/ui/order">按单查询</a>
+            <a class="chip" href="/admin/ui/orders">订单列表</a>
+            <a class="chip" href="/admin/ui/manual_tasks">人工任务</a>
+            <a class="chip" href="/admin/ui/watermarks">水位管理</a>
+            <a class="chip" href="/admin/ui/jobs">任务执行</a>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">手动触发（一次）</div>
+          <div class="chips">
+            {{range .jobs}}
+              <button class="chip chip-btn" data-run-job="{{.}}">{{.}}</button>
+            {{else}}
+              <div class="muted">未注册 job</div>
+            {{end}}
+          </div>
+          <div class="muted" style="margin-top:10px;">结果会显示在右下角通知。</div>
+        </div>
+      </div>
+
+      <h2 class="h2">水位（job_watermark）</h2>
+      <div class="card">
+        <table class="table">
+          <thead>
+            <tr>
+              <th style="width:200px;">job</th>
+              <th>watermark</th>
+              <th style="width:220px;">updated_at</th>
+            </tr>
+          </thead>
+          <tbody>
+            {{range .watermarks}}
+            <tr>
+              <td><code>{{.JobName}}</code></td>
+              <td><code>{{safeJSON .Watermark}}</code></td>
+              <td><code>{{.UpdatedAt.Format "2006-01-02 15:04:05"}}</code></td>
+            </tr>
+            {{else}}
+            <tr><td colspan="3" class="muted">暂无水位数据</td></tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+    </main>
+    <script src="/admin/ui/static/admin.js"></script>
+  </body>
+</html>
+

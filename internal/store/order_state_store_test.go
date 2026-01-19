@@ -11,13 +11,8 @@ import (
 func TestOrderStateStore_UpsertOrderIDs_Behavior(t *testing.T) {
 	t.Parallel()
 
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock.New err=%v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-
-	s, err := NewOrderStateStore(db)
+	gdb, mock := newMockGormDB(t)
+	s, err := NewOrderStateStore(gdb)
 	if err != nil {
 		t.Fatalf("NewOrderStateStore err=%v", err)
 	}
@@ -43,13 +38,8 @@ func TestOrderStateStore_UpsertOrderIDs_Behavior(t *testing.T) {
 func TestOrderStateStore_ClaimForPush_Behavior(t *testing.T) {
 	t.Parallel()
 
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock.New err=%v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-
-	s, err := NewOrderStateStore(db)
+	gdb, mock := newMockGormDB(t)
+	s, err := NewOrderStateStore(gdb)
 	if err != nil {
 		t.Fatalf("NewOrderStateStore err=%v", err)
 	}
@@ -81,13 +71,8 @@ func TestOrderStateStore_ClaimForPush_Behavior(t *testing.T) {
 func TestOrderStateStore_MarkPushSuccess_Behavior(t *testing.T) {
 	t.Parallel()
 
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock.New err=%v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-
-	s, err := NewOrderStateStore(db)
+	gdb, mock := newMockGormDB(t)
+	s, err := NewOrderStateStore(gdb)
 	if err != nil {
 		t.Fatalf("NewOrderStateStore err=%v", err)
 	}
@@ -110,13 +95,8 @@ func TestOrderStateStore_MarkPushSuccess_Behavior(t *testing.T) {
 func TestOrderStateStore_MarkPushFailure_Behavior(t *testing.T) {
 	t.Parallel()
 
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock.New err=%v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-
-	s, err := NewOrderStateStore(db)
+	gdb, mock := newMockGormDB(t)
+	s, err := NewOrderStateStore(gdb)
 	if err != nil {
 		t.Fatalf("NewOrderStateStore err=%v", err)
 	}
@@ -139,13 +119,8 @@ func TestOrderStateStore_MarkPushFailure_Behavior(t *testing.T) {
 func TestOrderStateStore_MarkPushManual_Behavior(t *testing.T) {
 	t.Parallel()
 
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock.New err=%v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-
-	s, err := NewOrderStateStore(db)
+	gdb, mock := newMockGormDB(t)
+	s, err := NewOrderStateStore(gdb)
 	if err != nil {
 		t.Fatalf("NewOrderStateStore err=%v", err)
 	}
@@ -168,13 +143,8 @@ func TestOrderStateStore_MarkPushManual_Behavior(t *testing.T) {
 func TestOrderStateStore_TryClaimAck_Behavior(t *testing.T) {
 	t.Parallel()
 
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock.New err=%v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-
-	s, err := NewOrderStateStore(db)
+	gdb, mock := newMockGormDB(t)
+	s, err := NewOrderStateStore(gdb)
 	if err != nil {
 		t.Fatalf("NewOrderStateStore err=%v", err)
 	}
@@ -201,13 +171,8 @@ func TestOrderStateStore_TryClaimAck_Behavior(t *testing.T) {
 func TestOrderStateStore_MarkAckSuccess_Behavior(t *testing.T) {
 	t.Parallel()
 
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock.New err=%v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-
-	s, err := NewOrderStateStore(db)
+	gdb, mock := newMockGormDB(t)
+	s, err := NewOrderStateStore(gdb)
 	if err != nil {
 		t.Fatalf("NewOrderStateStore err=%v", err)
 	}
@@ -230,13 +195,8 @@ func TestOrderStateStore_MarkAckSuccess_Behavior(t *testing.T) {
 func TestOrderStateStore_MarkAckFailure_Behavior(t *testing.T) {
 	t.Parallel()
 
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock.New err=%v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-
-	s, err := NewOrderStateStore(db)
+	gdb, mock := newMockGormDB(t)
+	s, err := NewOrderStateStore(gdb)
 	if err != nil {
 		t.Fatalf("NewOrderStateStore err=%v", err)
 	}
@@ -259,13 +219,9 @@ func TestOrderStateStore_MarkAckFailure_Behavior(t *testing.T) {
 func TestOrderStateStore_MarkAckManual_Behavior(t *testing.T) {
 	t.Parallel()
 
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock.New err=%v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	gdb, mock := newMockGormDB(t)
 
-	s, err := NewOrderStateStore(db)
+	s, err := NewOrderStateStore(gdb)
 	if err != nil {
 		t.Fatalf("NewOrderStateStore err=%v", err)
 	}
@@ -288,13 +244,9 @@ func TestOrderStateStore_MarkAckManual_Behavior(t *testing.T) {
 func TestOrderStateStore_TryClaimShipment_Behavior(t *testing.T) {
 	t.Parallel()
 
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock.New err=%v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	gdb, mock := newMockGormDB(t)
 
-	s, err := NewOrderStateStore(db)
+	s, err := NewOrderStateStore(gdb)
 	if err != nil {
 		t.Fatalf("NewOrderStateStore err=%v", err)
 	}
@@ -321,13 +273,9 @@ func TestOrderStateStore_TryClaimShipment_Behavior(t *testing.T) {
 func TestOrderStateStore_MarkShipmentSuccess_Behavior(t *testing.T) {
 	t.Parallel()
 
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock.New err=%v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	gdb, mock := newMockGormDB(t)
 
-	s, err := NewOrderStateStore(db)
+	s, err := NewOrderStateStore(gdb)
 	if err != nil {
 		t.Fatalf("NewOrderStateStore err=%v", err)
 	}
@@ -350,13 +298,9 @@ func TestOrderStateStore_MarkShipmentSuccess_Behavior(t *testing.T) {
 func TestOrderStateStore_MarkShipmentFailure_Behavior(t *testing.T) {
 	t.Parallel()
 
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock.New err=%v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	gdb, mock := newMockGormDB(t)
 
-	s, err := NewOrderStateStore(db)
+	s, err := NewOrderStateStore(gdb)
 	if err != nil {
 		t.Fatalf("NewOrderStateStore err=%v", err)
 	}
@@ -379,13 +323,9 @@ func TestOrderStateStore_MarkShipmentFailure_Behavior(t *testing.T) {
 func TestOrderStateStore_MarkShipmentManual_Behavior(t *testing.T) {
 	t.Parallel()
 
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock.New err=%v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	gdb, mock := newMockGormDB(t)
 
-	s, err := NewOrderStateStore(db)
+	s, err := NewOrderStateStore(gdb)
 	if err != nil {
 		t.Fatalf("NewOrderStateStore err=%v", err)
 	}
@@ -408,13 +348,9 @@ func TestOrderStateStore_MarkShipmentManual_Behavior(t *testing.T) {
 func TestOrderStateStore_ClaimForInvoice_Behavior(t *testing.T) {
 	t.Parallel()
 
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock.New err=%v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	gdb, mock := newMockGormDB(t)
 
-	s, err := NewOrderStateStore(db)
+	s, err := NewOrderStateStore(gdb)
 	if err != nil {
 		t.Fatalf("NewOrderStateStore err=%v", err)
 	}
@@ -446,13 +382,9 @@ func TestOrderStateStore_ClaimForInvoice_Behavior(t *testing.T) {
 func TestOrderStateStore_MarkInvoiceSuccess_Behavior(t *testing.T) {
 	t.Parallel()
 
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock.New err=%v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	gdb, mock := newMockGormDB(t)
 
-	s, err := NewOrderStateStore(db)
+	s, err := NewOrderStateStore(gdb)
 	if err != nil {
 		t.Fatalf("NewOrderStateStore err=%v", err)
 	}
@@ -475,13 +407,9 @@ func TestOrderStateStore_MarkInvoiceSuccess_Behavior(t *testing.T) {
 func TestOrderStateStore_MarkInvoiceFailure_Behavior(t *testing.T) {
 	t.Parallel()
 
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock.New err=%v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	gdb, mock := newMockGormDB(t)
 
-	s, err := NewOrderStateStore(db)
+	s, err := NewOrderStateStore(gdb)
 	if err != nil {
 		t.Fatalf("NewOrderStateStore err=%v", err)
 	}
@@ -504,13 +432,9 @@ func TestOrderStateStore_MarkInvoiceFailure_Behavior(t *testing.T) {
 func TestOrderStateStore_MarkInvoiceManual_Behavior(t *testing.T) {
 	t.Parallel()
 
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock.New err=%v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	gdb, mock := newMockGormDB(t)
 
-	s, err := NewOrderStateStore(db)
+	s, err := NewOrderStateStore(gdb)
 	if err != nil {
 		t.Fatalf("NewOrderStateStore err=%v", err)
 	}

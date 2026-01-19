@@ -60,26 +60,22 @@ func TestOrderPipeline_PullOrders_PaginatesAndAdvancesWatermark(t *testing.T) {
 		t.Fatalf("dsco.New err=%v", err)
 	}
 
-	// store 使用 sqlmock
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock.New err=%v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	// store 使用 sqlmock（通过 GORM 绑定 sqlmock 连接）。
+	gdb, mock := newMockGormDB(t)
 
-	orderState, err := store.NewOrderStateStore(db)
+	orderState, err := store.NewOrderStateStore(gdb)
 	if err != nil {
 		t.Fatalf("NewOrderStateStore err=%v", err)
 	}
-	watermark, err := store.NewWatermarkStore(db)
+	watermark, err := store.NewWatermarkStore(gdb)
 	if err != nil {
 		t.Fatalf("NewWatermarkStore err=%v", err)
 	}
-	manual, err := store.NewManualTaskStore(db)
+	manual, err := store.NewManualTaskStore(gdb)
 	if err != nil {
 		t.Fatalf("NewManualTaskStore err=%v", err)
 	}
-	orderRaw, err := store.NewDscoOrderRawStore(db)
+	orderRaw, err := store.NewDscoOrderRawStore(gdb)
 	if err != nil {
 		t.Fatalf("NewDscoOrderRawStore err=%v", err)
 	}
@@ -187,25 +183,21 @@ func TestOrderPipeline_PushOrdersToLingXing_Behavior(t *testing.T) {
 		t.Fatalf("lingxing.New err=%v", err)
 	}
 
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock.New err=%v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	gdb, mock := newMockGormDB(t)
 
-	orderState, err := store.NewOrderStateStore(db)
+	orderState, err := store.NewOrderStateStore(gdb)
 	if err != nil {
 		t.Fatalf("NewOrderStateStore err=%v", err)
 	}
-	watermark, err := store.NewWatermarkStore(db)
+	watermark, err := store.NewWatermarkStore(gdb)
 	if err != nil {
 		t.Fatalf("NewWatermarkStore err=%v", err)
 	}
-	manual, err := store.NewManualTaskStore(db)
+	manual, err := store.NewManualTaskStore(gdb)
 	if err != nil {
 		t.Fatalf("NewManualTaskStore err=%v", err)
 	}
-	orderRaw, err := store.NewDscoOrderRawStore(db)
+	orderRaw, err := store.NewDscoOrderRawStore(gdb)
 	if err != nil {
 		t.Fatalf("NewDscoOrderRawStore err=%v", err)
 	}
@@ -282,16 +274,12 @@ func TestOrderPipeline_PushOrdersToLingXing_RetryExceededGoesManual(t *testing.T
 		t.Fatalf("lingxing.New err=%v", err)
 	}
 
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock.New err=%v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	gdb, mock := newMockGormDB(t)
 
-	orderState, _ := store.NewOrderStateStore(db)
-	watermark, _ := store.NewWatermarkStore(db)
-	manual, _ := store.NewManualTaskStore(db)
-	orderRaw, _ := store.NewDscoOrderRawStore(db)
+	orderState, _ := store.NewOrderStateStore(gdb)
+	watermark, _ := store.NewWatermarkStore(gdb)
+	manual, _ := store.NewManualTaskStore(gdb)
+	orderRaw, _ := store.NewDscoOrderRawStore(gdb)
 
 	// ClaimForPush：BEGIN -> SELECT -> UPDATE -> COMMIT
 	mock.ExpectBegin()
@@ -309,9 +297,9 @@ func TestOrderPipeline_PushOrdersToLingXing_RetryExceededGoesManual(t *testing.T
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	// retry_count 已到上限：触发转人工
-	mock.ExpectQuery("SELECT retry_count FROM sync_order_state").
+	mock.ExpectQuery("SELECT dsco_order_id, retry_count FROM sync_order_state").
 		WithArgs("d1").
-		WillReturnRows(sqlmock.NewRows([]string{"retry_count"}).AddRow(5))
+		WillReturnRows(sqlmock.NewRows([]string{"dsco_order_id", "retry_count"}).AddRow("d1", 5))
 	mock.ExpectExec("INSERT INTO manual_task").
 		WithArgs("max_retry_exceeded", sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
@@ -386,25 +374,21 @@ func TestOrderPipeline_AckToDSCO_Behavior(t *testing.T) {
 		t.Fatalf("lingxing.New err=%v", err)
 	}
 
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock.New err=%v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	gdb, mock := newMockGormDB(t)
 
-	orderState, err := store.NewOrderStateStore(db)
+	orderState, err := store.NewOrderStateStore(gdb)
 	if err != nil {
 		t.Fatalf("NewOrderStateStore err=%v", err)
 	}
-	watermark, err := store.NewWatermarkStore(db)
+	watermark, err := store.NewWatermarkStore(gdb)
 	if err != nil {
 		t.Fatalf("NewWatermarkStore err=%v", err)
 	}
-	manual, err := store.NewManualTaskStore(db)
+	manual, err := store.NewManualTaskStore(gdb)
 	if err != nil {
 		t.Fatalf("NewManualTaskStore err=%v", err)
 	}
-	orderRaw, err := store.NewDscoOrderRawStore(db)
+	orderRaw, err := store.NewDscoOrderRawStore(gdb)
 	if err != nil {
 		t.Fatalf("NewDscoOrderRawStore err=%v", err)
 	}
@@ -507,25 +491,21 @@ func TestOrderPipeline_ShipToDSCO_Behavior(t *testing.T) {
 		t.Fatalf("lingxing.New err=%v", err)
 	}
 
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock.New err=%v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	gdb, mock := newMockGormDB(t)
 
-	orderState, err := store.NewOrderStateStore(db)
+	orderState, err := store.NewOrderStateStore(gdb)
 	if err != nil {
 		t.Fatalf("NewOrderStateStore err=%v", err)
 	}
-	watermark, err := store.NewWatermarkStore(db)
+	watermark, err := store.NewWatermarkStore(gdb)
 	if err != nil {
 		t.Fatalf("NewWatermarkStore err=%v", err)
 	}
-	manual, err := store.NewManualTaskStore(db)
+	manual, err := store.NewManualTaskStore(gdb)
 	if err != nil {
 		t.Fatalf("NewManualTaskStore err=%v", err)
 	}
-	orderRaw, err := store.NewDscoOrderRawStore(db)
+	orderRaw, err := store.NewDscoOrderRawStore(gdb)
 	if err != nil {
 		t.Fatalf("NewDscoOrderRawStore err=%v", err)
 	}
@@ -620,25 +600,21 @@ func TestOrderPipeline_InvoiceToDSCO_Behavior(t *testing.T) {
 		t.Fatalf("dsco.New err=%v", err)
 	}
 
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock.New err=%v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	gdb, mock := newMockGormDB(t)
 
-	orderState, err := store.NewOrderStateStore(db)
+	orderState, err := store.NewOrderStateStore(gdb)
 	if err != nil {
 		t.Fatalf("NewOrderStateStore err=%v", err)
 	}
-	watermark, err := store.NewWatermarkStore(db)
+	watermark, err := store.NewWatermarkStore(gdb)
 	if err != nil {
 		t.Fatalf("NewWatermarkStore err=%v", err)
 	}
-	manual, err := store.NewManualTaskStore(db)
+	manual, err := store.NewManualTaskStore(gdb)
 	if err != nil {
 		t.Fatalf("NewManualTaskStore err=%v", err)
 	}
-	orderRaw, err := store.NewDscoOrderRawStore(db)
+	orderRaw, err := store.NewDscoOrderRawStore(gdb)
 	if err != nil {
 		t.Fatalf("NewDscoOrderRawStore err=%v", err)
 	}
@@ -723,16 +699,12 @@ func TestOrderPipeline_InvoiceToDSCO_UsesRetailPriceFallback(t *testing.T) {
 		t.Fatalf("dsco.New err=%v", err)
 	}
 
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock.New err=%v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	gdb, mock := newMockGormDB(t)
 
-	orderState, _ := store.NewOrderStateStore(db)
-	watermark, _ := store.NewWatermarkStore(db)
-	manual, _ := store.NewManualTaskStore(db)
-	orderRaw, _ := store.NewDscoOrderRawStore(db)
+	orderState, _ := store.NewOrderStateStore(gdb)
+	watermark, _ := store.NewWatermarkStore(gdb)
+	manual, _ := store.NewManualTaskStore(gdb)
+	orderRaw, _ := store.NewDscoOrderRawStore(gdb)
 
 	// ClaimForInvoice：BEGIN -> SELECT -> UPDATE -> COMMIT
 	mock.ExpectBegin()

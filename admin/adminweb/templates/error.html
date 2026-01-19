@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{.title}} - Admin</title>
+    <link rel="stylesheet" href="/admin/ui/static/admin.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <div class="brand">iPass Admin</div>
+        <nav class="nav">
+          <a href="/admin/ui/">总览</a>
+          <a href="/admin/ui/orders">订单</a>
+          <a href="/admin/ui/manual_tasks">人工</a>
+          <a href="/admin/ui/watermarks">水位</a>
+          <a href="/admin/ui/jobs">任务</a>
+        </nav>
+        <form class="logout" method="post" action="/admin/ui/logout">
+          <button class="btn btn-ghost" type="submit">退出</button>
+        </form>
+      </div>
+    </header>
+    <main class="container">
+      <h1 class="h1">发生错误</h1>
+      <div class="card">
+        <div class="alert">{{.error}}</div>
+        <div style="margin-top:12px;">
+          <a class="btn btn-ghost" href="/admin/ui/">返回总览</a>
+        </div>
+      </div>
+    </main>
+    <script src="/admin/ui/static/admin.js"></script>
+  </body>
+</html>
+

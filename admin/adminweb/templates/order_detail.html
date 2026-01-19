@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{.title}} - Admin</title>
+    <link rel="stylesheet" href="/admin/ui/static/admin.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <div class="brand">iPass Admin</div>
+        <nav class="nav">
+          <a href="/admin/ui/">总览</a>
+          <a href="/admin/ui/orders">订单</a>
+          <a href="/admin/ui/manual_tasks">人工</a>
+          <a href="/admin/ui/watermarks">水位</a>
+          <a href="/admin/ui/jobs">任务</a>
+        </nav>
+        <form class="logout" method="post" action="/admin/ui/logout">
+          <button class="btn btn-ghost" type="submit">退出</button>
+        </form>
+      </div>
+    </header>
+    <main class="container">
+      <h1 class="h1">订单详情</h1>
+
+      <div class="card">
+        <form method="get" action="/admin/ui/order" class="row">
+          <div style="flex:1;">
+            <label class="label">dsco_order_id</label>
+            <input class="input" name="dsco_order_id" placeholder="请输入 dscoOrderId" value="{{with .dsco_order_id}}{{.}}{{end}}">
+          </div>
+          <div style="align-self:end;">
+            <button class="btn" type="submit">查询</button>
+          </div>
+        </form>
+      </div>
+
+      {{if .error}}
+        <div class="card"><div class="alert">{{.error}}</div></div>
+      {{end}}
+
+      {{with .item}}
+      <div class="card">
+        <table class="kv">
+          <tr><th>dsco_order_id</th><td><code>{{.DscoOrderID}}</code></td></tr>
+          <tr><th>lingxing_global_order_no</th><td><code>{{with .LingxingGlobalOrderNo}}{{.}}{{end}}</code></td></tr>
+          <tr><th>push_status</th><td><code>{{.PushedToLXStatus}}</code></td></tr>
+          <tr><th>ack_status</th><td><code>{{.AckedToDSCOStatus}}</code></td></tr>
+          <tr><th>ship_status</th><td><code>{{.ShippedToDSCOStatus}}</code></td></tr>
+          <tr><th>tracking_no</th><td><code>{{with .ShippedTrackingNo}}{{.}}{{end}}</code></td></tr>
+          <tr><th>invoice_status</th><td><code>{{.InvoicedToDSCOStatus}}</code></td></tr>
+          <tr><th>invoice_id</th><td><code>{{with .DscoInvoiceID}}{{.}}{{end}}</code></td></tr>
+          <tr><th>retry_count</th><td><code>{{.RetryCount}}</code></td></tr>
+          <tr><th>last_error</th><td><code>{{with .LastError}}{{.}}{{end}}</code></td></tr>
+          <tr><th>last_attempt_at</th><td><code>{{with .LastAttemptAt}}{{.Format "2006-01-02 15:04:05"}}{{end}}</code></td></tr>
+          <tr><th>updated_at</th><td><code>{{.UpdatedAt.Format "2006-01-02 15:04:05"}}</code></td></tr>
+        </table>
+      </div>
+      {{end}}
+    </main>
+    <script src="/admin/ui/static/admin.js"></script>
+  </body>
+</html>
+

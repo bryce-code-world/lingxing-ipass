@@ -16,21 +16,17 @@ import (
 func TestHandler_WatermarkSetAndGet_Behavior(t *testing.T) {
 	t.Parallel()
 
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock.New err=%v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	gdb, mock := newMockGormDB(t)
 
-	wm, err := store.NewWatermarkStore(db)
+	wm, err := store.NewWatermarkStore(gdb)
 	if err != nil {
 		t.Fatalf("NewWatermarkStore err=%v", err)
 	}
-	manual, err := store.NewManualTaskStore(db)
+	manual, err := store.NewManualTaskStore(gdb)
 	if err != nil {
 		t.Fatalf("NewManualTaskStore err=%v", err)
 	}
-	order, err := store.NewOrderStateStore(db)
+	order, err := store.NewOrderStateStore(gdb)
 	if err != nil {
 		t.Fatalf("NewOrderStateStore err=%v", err)
 	}
@@ -73,15 +69,11 @@ func TestHandler_WatermarkSetAndGet_Behavior(t *testing.T) {
 func TestHandler_RunJob_Behavior(t *testing.T) {
 	t.Parallel()
 
-	db, _, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock.New err=%v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	gdb, _ := newMockGormDB(t)
 
-	wm, _ := store.NewWatermarkStore(db)
-	manual, _ := store.NewManualTaskStore(db)
-	order, _ := store.NewOrderStateStore(db)
+	wm, _ := store.NewWatermarkStore(gdb)
+	manual, _ := store.NewManualTaskStore(gdb)
+	order, _ := store.NewOrderStateStore(gdb)
 
 	var called bool
 	h, err := NewHandler(wm, manual, order, map[string]JobRunner{
@@ -109,15 +101,11 @@ func TestHandler_RunJob_Behavior(t *testing.T) {
 func TestHandler_ManualTasks_Behavior(t *testing.T) {
 	t.Parallel()
 
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock.New err=%v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	gdb, mock := newMockGormDB(t)
 
-	wm, _ := store.NewWatermarkStore(db)
-	manual, _ := store.NewManualTaskStore(db)
-	order, _ := store.NewOrderStateStore(db)
+	wm, _ := store.NewWatermarkStore(gdb)
+	manual, _ := store.NewManualTaskStore(gdb)
+	order, _ := store.NewOrderStateStore(gdb)
 
 	h, err := NewHandler(wm, manual, order, nil)
 	if err != nil {
@@ -145,15 +133,11 @@ func TestHandler_ManualTasks_Behavior(t *testing.T) {
 func TestHandler_OrderStateGet_Behavior(t *testing.T) {
 	t.Parallel()
 
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock.New err=%v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	gdb, mock := newMockGormDB(t)
 
-	wm, _ := store.NewWatermarkStore(db)
-	manual, _ := store.NewManualTaskStore(db)
-	order, _ := store.NewOrderStateStore(db)
+	wm, _ := store.NewWatermarkStore(gdb)
+	manual, _ := store.NewManualTaskStore(gdb)
+	order, _ := store.NewOrderStateStore(gdb)
 
 	h, err := NewHandler(wm, manual, order, nil)
 	if err != nil {
@@ -198,15 +182,11 @@ func TestHandler_OrderStateGet_Behavior(t *testing.T) {
 func TestHandler_OrderStatesList_Behavior(t *testing.T) {
 	t.Parallel()
 
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock.New err=%v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	gdb, mock := newMockGormDB(t)
 
-	wm, _ := store.NewWatermarkStore(db)
-	manual, _ := store.NewManualTaskStore(db)
-	order, _ := store.NewOrderStateStore(db)
+	wm, _ := store.NewWatermarkStore(gdb)
+	manual, _ := store.NewManualTaskStore(gdb)
+	order, _ := store.NewOrderStateStore(gdb)
 
 	h, err := NewHandler(wm, manual, order, nil)
 	if err != nil {

@@ -30,6 +30,10 @@ type SystemConfig struct {
 		Enable bool
 		Addr   string
 	}
+	Admin struct {
+		// Password 用于管理后台访问控制（一期最小：单密码）。
+		Password string
+	}
 	DSCO struct {
 		BaseURL string
 		Token   string
@@ -114,6 +118,8 @@ func LoadFromEnv() (Config, error) {
 	if cfg.System.HTTP.Addr == "" {
 		cfg.System.HTTP.Addr = ":8080"
 	}
+
+	cfg.System.Admin.Password = strings.TrimSpace(os.Getenv("IPASS_ADMIN_PASSWORD"))
 
 	cfg.System.DSCO.BaseURL = strings.TrimSpace(os.Getenv("IPASS_DSCO_BASE_URL"))
 	cfg.System.DSCO.Token = strings.TrimSpace(os.Getenv("IPASS_DSCO_TOKEN"))

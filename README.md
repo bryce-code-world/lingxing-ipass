@@ -10,6 +10,7 @@
 - 幂等：以 `dscoOrderId` 为订单幂等主键；
 - 失败可追踪：全链路 `trace_id` + JSON Lines 落盘日志；
 - 可运维：提供最小 HTTP 管理端用于改水位、查人工任务、手动触发 job。
+- 可视化：提供 Admin 管理后台（页面 + API），用于长期运维排障。
 
 相关设计文档：
 - `doc/一期系统设计文档/1. 一期业务需求（DSCO-领星自动化）.md`
@@ -43,6 +44,7 @@
 - `IPASS_DB_DSN`：MySQL DSN
 - `IPASS_LOG_DIR`：日志目录（默认 `logs/`）
 - `IPASS_HTTP_ENABLE` / `IPASS_HTTP_ADDR`：HTTP 管理端开关与监听地址
+- `IPASS_ADMIN_PASSWORD`：Admin 后台访问密码（一期最小：单密码；用于 UI 与管理 API）
 - `IPASS_DSCO_BASE_URL` / `IPASS_DSCO_TOKEN`：DSCO API 配置（一期使用请求头 bearer token）
 - `IPASS_LINGXING_BASE_URL` / `IPASS_LINGXING_APP_ID` / `IPASS_LINGXING_ACCESS_TOKEN`：领星 OpenAPI 配置
 - `IPASS_LINGXING_PLATFORM_CODE` / `IPASS_LINGXING_STORE_ID`：推单固定参数（一期写死在配置）
@@ -79,6 +81,30 @@
 - `GET /admin/watermark/get?job=...`：获取某个 job 的水位（返回 JSON）
 - `POST /admin/watermark/set?job=...`：设置某个 job 的水位（请求体为 JSON，直接写入 `job_watermark.watermark`）
 - `GET /admin/manual_tasks?status=0&limit=50&offset=0`：查看人工任务队列
+
+认证：
+- 如果配置了 `IPASS_ADMIN_PASSWORD`，访问上述 `/admin/*` 接口需要提供认证：
+  - 浏览器：先访问 `GET /admin/ui/login` 登录（session cookie）
+  - 脚本/命令行：请求头携带 `X-Admin-Password: <IPASS_ADMIN_PASSWORD>`
+
+## Admin 管理后台（可视化）
+
+定位：用于运维与排障，不承载业务主流程；页面只读取本系统数据库并调用本系统管理 API。
+
+入口：
+- 登录页：`GET /admin/ui/login`
+- 总览：`GET /admin/ui/`
+- 订单：`GET /admin/ui/orders`、`GET /admin/ui/order?dsco_order_id=...`
+- 人工任务：`GET /admin/ui/manual_tasks`
+- 水位：`GET /admin/ui/watermarks`
+- 手动触发：`GET /admin/ui/jobs`
+
+认证口径：
+- “每次打开浏览器/新会话登录一次”：登录成功后写入 session cookie（浏览器关闭即失效）
+- 命令行/脚本访问 JSON API：请求头 `X-Admin-Password`（便于 curl/自动化）
+
+代码位置（与业务代码分离）：
+- `admin/adminweb/`：Admin UI + Admin API + 鉴权与静态资源（Gin + `html/template`）
 
 一期 job 名称：
 - `pull_dsco_orders`
