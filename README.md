@@ -56,6 +56,61 @@
 - `IPASS_STOCK_SKU_TO_DSCO_SKU_JSON`：库存同步可选映射（领星 SKU -> DSCO SKU）
 - `IPASS_SHIP_DATE_SOURCE`：发货回传 shipDate 取值来源（`delivered_at`/`stock_delivered_at`/`none`）
 
+## 业务映射如何注入（保姆级）
+
+一期的“业务映射”不做复杂后台配置，统一通过 `.env` 注入（环境变量），优点是简单、可审计、可复现。
+
+### 1) 库存：领星仓库 WID -> DSCO warehouseCode（必填）
+
+配置项：`IPASS_STOCK_WID_TO_DSCO_WAREHOUSE_CODE_JSON`
+
+说明：
+- Key：领星仓库 WID（注意：这里按字符串处理，例如 `"26"`）
+- Value：DSCO 仓库编码 `warehouseCode`（例如 `"WH1"`）
+- 该映射仅用于 `sync_stock` 任务
+
+示例（`.env`）：
+
+```dotenv
+IPASS_STOCK_WID_TO_DSCO_WAREHOUSE_CODE_JSON="{\"26\":\"WH1\",\"27\":\"WH2\"}"
+```
+
+### 2) 库存：领星 SKU -> DSCO SKU（可选）
+
+配置项：`IPASS_STOCK_SKU_TO_DSCO_SKU_JSON`
+
+说明：
+- Key：领星侧 SKU（字符串）
+- Value：DSCO 侧 SKU（字符串）
+- 不配置时默认“同名直传”（领星 SKU 原样作为 DSCO SKU）
+
+示例（`.env`）：
+
+```dotenv
+IPASS_STOCK_SKU_TO_DSCO_SKU_JSON="{\"LXSKU-1\":\"DSCOSKU-1\"}"
+```
+
+### 3) 发货回传 shipDate 口径（可选但建议明确）
+
+配置项：`IPASS_SHIP_DATE_SOURCE`
+
+可选值：
+- `delivered_at`：使用领星 WMS 的 `delivered_at` 作为 DSCO `shipDate`（默认）
+- `stock_delivered_at`：使用领星 WMS 的 `stock_delivered_at`
+- `none`：不回传 `shipDate`
+
+示例（`.env`）：
+
+```dotenv
+IPASS_SHIP_DATE_SOURCE="delivered_at"
+```
+
+### 4) 如何验证映射生效
+
+- 仓库映射：运行 `POST /admin/run?job=sync_stock` 后，DSCO 库存会落到对应 `warehouseCode`（若缺映射会写入 `manual_task(task_type=missing_mapping)`）。
+- SKU 映射：同上；若 DSCO 库存更新的 SKU 与预期一致则表示生效（不配置则应与领星 SKU 一致）。
+- shipDate 口径：运行 `POST /admin/run?job=ship_to_dsco` 后，在 DSCO 侧查看发货记录的 `shipDate` 是否符合预期。
+
 任务开关与间隔（示例）：
 - `IPASS_JOB_PULL_DSCO_ORDERS_ENABLE` / `IPASS_JOB_PULL_DSCO_ORDERS_INTERVAL_SEC`
 - `IPASS_JOB_PUSH_ORDERS_TO_LINGXING_ENABLE` / `IPASS_JOB_PUSH_ORDERS_TO_LINGXING_INTERVAL_SEC` / `IPASS_JOB_PUSH_ORDERS_TO_LINGXING_BATCH_SIZE`
