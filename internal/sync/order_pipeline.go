@@ -33,6 +33,11 @@ type OrderPipeline struct {
 	orderRaw   *store.DscoOrderRawStore
 
 	now func() time.Time
+
+	// maxRetryPerOrder 表示同一 dscoOrderId 在单个环节的最大重试次数；达到上限后转人工，避免无限重试。
+	maxRetryPerOrder int
+	// shipDateSource 表示发货回传的 shipDate 取值来源（delivered_at/stock_delivered_at/none）。
+	shipDateSource string
 }
 
 type PullDSCOOrdersWatermark struct {
@@ -40,7 +45,7 @@ type PullDSCOOrdersWatermark struct {
 	Since string `json:"since"` // RFC3339
 }
 
-func NewOrderPipeline(dscoCli *dsco.Client, lingxingCli *lingxing.Client, orderState *store.OrderStateStore, watermark *store.WatermarkStore, manualTask *store.ManualTaskStore, orderRaw *store.DscoOrderRawStore, now func() time.Time) (*OrderPipeline, error) {
+func NewOrderPipeline(dscoCli *dsco.Client, lingxingCli *lingxing.Client, orderState *store.OrderStateStore, watermark *store.WatermarkStore, manualTask *store.ManualTaskStore, orderRaw *store.DscoOrderRawStore, now func() time.Time, maxRetryPerOrder int, shipDateSource string) (*OrderPipeline, error) {
 	if dscoCli == nil {
 		return nil, errors.New("dscoCli 不能为空")
 	}
@@ -59,15 +64,48 @@ func NewOrderPipeline(dscoCli *dsco.Client, lingxingCli *lingxing.Client, orderS
 	if now == nil {
 		now = time.Now
 	}
+	if maxRetryPerOrder <= 0 {
+		maxRetryPerOrder = 5
+	}
+	shipDateSource = strings.TrimSpace(shipDateSource)
+	if shipDateSource == "" {
+		shipDateSource = "delivered_at"
+	}
+	switch shipDateSource {
+	case "delivered_at", "stock_delivered_at", "none":
+	default:
+		return nil, errors.New("shipDateSource 仅支持 delivered_at/stock_delivered_at/none")
+	}
 	return &OrderPipeline{
-		dscoCli:     dscoCli,
-		lingxingCli: lingxingCli,
-		orderState:  orderState,
-		watermark:   watermark,
-		manualTask:  manualTask,
-		orderRaw:    orderRaw,
-		now:         now,
+		dscoCli:          dscoCli,
+		lingxingCli:      lingxingCli,
+		orderState:       orderState,
+		watermark:        watermark,
+		manualTask:       manualTask,
+		orderRaw:         orderRaw,
+		now:              now,
+		maxRetryPerOrder: maxRetryPerOrder,
+		shipDateSource:   shipDateSource,
 	}, nil
+}
+
+func (p *OrderPipeline) tryTurnManualOnRetryExceeded(ctx context.Context, dscoOrderID string, stage string, reason string, markManual func(ctx context.Context, dscoOrderID string, reason string) error) {
+	if p.maxRetryPerOrder <= 0 || markManual == nil {
+		return
+	}
+	n, ok, err := p.orderState.GetRetryCount(ctx, dscoOrderID)
+	if err != nil || !ok {
+		return
+	}
+	if n < p.maxRetryPerOrder {
+		return
+	}
+	_ = p.manualTask.Create(ctx, store.ManualTask{
+		TaskType:    "max_retry_exceeded",
+		DscoOrderID: dscoOrderID,
+		Payload:     []byte(fmt.Sprintf(`{"stage":%q,"reason":%q,"retry_count":%d,"max_retry":%d}`, stage, reason, n, p.maxRetryPerOrder)),
+	})
+	_ = markManual(ctx, dscoOrderID, "max_retry_exceeded")
 }
 
 // PullOrders 增量拉取 DSCO 订单，只落库 dscoOrderId，并推进水位。
@@ -211,6 +249,9 @@ func (p *OrderPipeline) PushOrdersToLingXing(ctx context.Context, platformCode i
 		})
 		if dscoErr != nil {
 			_ = p.orderState.MarkPushFailure(ctx, dscoOrderID, dscoErr.Error())
+			p.tryTurnManualOnRetryExceeded(ctx, dscoOrderID, "push_to_lingxing", dscoErr.Error(), func(ctx context.Context, dscoOrderID string, reason string) error {
+				return p.orderState.MarkPushManual(ctx, dscoOrderID, reason)
+			})
 			logger.Error(ctx, "push_orders_dsco_failed", "job", jobNamePushOrdersToLingXing, "dsco_order_id", dscoOrderID, "err", dscoErr.Error())
 			continue
 		}
@@ -241,6 +282,9 @@ func (p *OrderPipeline) PushOrdersToLingXing(ctx context.Context, platformCode i
 		})
 		if lxErr != nil {
 			_ = p.orderState.MarkPushFailure(ctx, dscoOrderID, lxErr.Error())
+			p.tryTurnManualOnRetryExceeded(ctx, dscoOrderID, "push_to_lingxing", lxErr.Error(), func(ctx context.Context, dscoOrderID string, reason string) error {
+				return p.orderState.MarkPushManual(ctx, dscoOrderID, reason)
+			})
 			logger.Error(ctx, "push_orders_lingxing_failed", "job", jobNamePushOrdersToLingXing, "dsco_order_id", dscoOrderID, "err", lxErr.Error())
 			continue
 		}
@@ -267,6 +311,9 @@ func (p *OrderPipeline) PushOrdersToLingXing(ctx context.Context, platformCode i
 			errMsg = "领星创建订单未返回 success_detail"
 		}
 		_ = p.orderState.MarkPushFailure(ctx, dscoOrderID, errMsg)
+		p.tryTurnManualOnRetryExceeded(ctx, dscoOrderID, "push_to_lingxing", errMsg, func(ctx context.Context, dscoOrderID string, reason string) error {
+			return p.orderState.MarkPushManual(ctx, dscoOrderID, reason)
+		})
 		logger.Error(ctx, "push_orders_failed", "job", jobNamePushOrdersToLingXing, "dsco_order_id", dscoOrderID, "err", errMsg)
 	}
 
@@ -454,6 +501,9 @@ func (p *OrderPipeline) AckToDSCO(ctx context.Context, platformCode int, storeID
 			})
 			if err != nil {
 				_ = p.orderState.MarkAckFailure(ctx, dscoOrderID, err.Error())
+				p.tryTurnManualOnRetryExceeded(ctx, dscoOrderID, "ack_to_dsco", err.Error(), func(ctx context.Context, dscoOrderID string, reason string) error {
+					return p.orderState.MarkAckManual(ctx, dscoOrderID, reason)
+				})
 				logger.Error(ctx, "ack_failed", "job", jobNameAckToDSCO, "dsco_order_id", dscoOrderID, "err", err.Error())
 				continue
 			}
@@ -585,11 +635,17 @@ func (p *OrderPipeline) ShipToDSCO(ctx context.Context, platformCode int, storeI
 			wms, err := p.queryWmsShipment(ctx, dscoOrderID, sid)
 			if err != nil {
 				_ = p.orderState.MarkShipmentFailure(ctx, dscoOrderID, err.Error())
+				p.tryTurnManualOnRetryExceeded(ctx, dscoOrderID, "ship_to_dsco", err.Error(), func(ctx context.Context, dscoOrderID string, reason string) error {
+					return p.orderState.MarkShipmentManual(ctx, dscoOrderID, reason)
+				})
 				logger.Error(ctx, "ship_wms_failed", "job", jobNameShipToDSCO, "dsco_order_id", dscoOrderID, "err", err.Error())
 				continue
 			}
 			if len(wms) == 0 {
 				_ = p.orderState.MarkShipmentFailure(ctx, dscoOrderID, "wmsOrderList 无记录")
+				p.tryTurnManualOnRetryExceeded(ctx, dscoOrderID, "ship_to_dsco", "wmsOrderList 无记录", func(ctx context.Context, dscoOrderID string, reason string) error {
+					return p.orderState.MarkShipmentManual(ctx, dscoOrderID, reason)
+				})
 				logger.Error(ctx, "ship_wms_empty", "job", jobNameShipToDSCO, "dsco_order_id", dscoOrderID)
 				continue
 			}
@@ -608,25 +664,36 @@ func (p *OrderPipeline) ShipToDSCO(ctx context.Context, platformCode int, storeI
 			items := buildShipmentLineItems(wms)
 			if len(items) == 0 {
 				_ = p.orderState.MarkShipmentFailure(ctx, dscoOrderID, "wms product_info 为空")
+				p.tryTurnManualOnRetryExceeded(ctx, dscoOrderID, "ship_to_dsco", "wms product_info 为空", func(ctx context.Context, dscoOrderID string, reason string) error {
+					return p.orderState.MarkShipmentManual(ctx, dscoOrderID, reason)
+				})
 				continue
 			}
 
+			shipDate := pickShipDateRFC3339(wms, p.shipDateSource)
 			resp, err := p.dscoCli.Order.SingleShipment(ctx, dsco.ShipmentsForUpdate{
 				DscoOrderID: dscoOrderID,
 				Shipments: []dsco.ShipmentForUpdate{
 					{
 						TrackingNumber: tracking,
+						ShipDate:       shipDate,
 						LineItems:      items,
 					},
 				},
 			})
 			if err != nil {
 				_ = p.orderState.MarkShipmentFailure(ctx, dscoOrderID, err.Error())
+				p.tryTurnManualOnRetryExceeded(ctx, dscoOrderID, "ship_to_dsco", err.Error(), func(ctx context.Context, dscoOrderID string, reason string) error {
+					return p.orderState.MarkShipmentManual(ctx, dscoOrderID, reason)
+				})
 				logger.Error(ctx, "ship_dsco_failed", "job", jobNameShipToDSCO, "dsco_order_id", dscoOrderID, "err", err.Error())
 				continue
 			}
 			if resp == nil || !resp.Success {
 				_ = p.orderState.MarkShipmentFailure(ctx, dscoOrderID, "DSCO singleShipment 返回 success=false")
+				p.tryTurnManualOnRetryExceeded(ctx, dscoOrderID, "ship_to_dsco", "DSCO singleShipment 返回 success=false", func(ctx context.Context, dscoOrderID string, reason string) error {
+					return p.orderState.MarkShipmentManual(ctx, dscoOrderID, reason)
+				})
 				logger.Error(ctx, "ship_dsco_failed", "job", jobNameShipToDSCO, "dsco_order_id", dscoOrderID, "err", "DSCO singleShipment 返回 success=false")
 				continue
 			}
@@ -707,6 +774,48 @@ func buildShipmentLineItems(items []lingxing.WmsOrder) []dsco.ShipmentLineItemFo
 	return out
 }
 
+func pickShipDateRFC3339(items []lingxing.WmsOrder, source string) string {
+	source = strings.TrimSpace(source)
+	if source == "" {
+		source = "delivered_at"
+	}
+	if source == "none" {
+		return ""
+	}
+	for _, it := range items {
+		var raw string
+		switch source {
+		case "stock_delivered_at":
+			raw = strings.TrimSpace(it.StockDeliveredAt)
+		default:
+			raw = strings.TrimSpace(it.DeliveredAt)
+		}
+		if raw == "" {
+			continue
+		}
+		if v, ok := parseLingXingDatetimeToRFC3339(raw); ok {
+			return v
+		}
+	}
+	return ""
+}
+
+func parseLingXingDatetimeToRFC3339(raw string) (string, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", false
+	}
+	// 先尝试 RFC3339（部分接口可能直接返回 ISO8601）。
+	if ts, err := time.Parse(time.RFC3339, raw); err == nil {
+		return ts.UTC().Format(time.RFC3339), true
+	}
+	// 领星 WMS 常见格式：2006-01-02 15:04:05（文档为字符串时间）。
+	if ts, err := time.ParseInLocation("2006-01-02 15:04:05", raw, time.UTC); err == nil {
+		return ts.UTC().Format(time.RFC3339), true
+	}
+	return "", false
+}
+
 // InvoiceToDSCO 生成并回传 DSCO 发票（一期最小字段集）。
 //
 // 幂等：
@@ -750,6 +859,9 @@ func (p *OrderPipeline) InvoiceToDSCO(ctx context.Context, batchSize int) error 
 		}
 		if getErr != nil {
 			_ = p.orderState.MarkInvoiceFailure(ctx, dscoOrderID, getErr.Error())
+			p.tryTurnManualOnRetryExceeded(ctx, dscoOrderID, "invoice_to_dsco", getErr.Error(), func(ctx context.Context, dscoOrderID string, reason string) error {
+				return p.orderState.MarkInvoiceManual(ctx, dscoOrderID, reason)
+			})
 			logger.Error(ctx, "invoice_get_failed", "job", jobNameInvoiceToDSCO, "dsco_order_id", dscoOrderID, "err", getErr.Error())
 			continue
 		}
@@ -762,6 +874,9 @@ func (p *OrderPipeline) InvoiceToDSCO(ctx context.Context, batchSize int) error 
 		})
 		if orderErr != nil {
 			_ = p.orderState.MarkInvoiceFailure(ctx, dscoOrderID, orderErr.Error())
+			p.tryTurnManualOnRetryExceeded(ctx, dscoOrderID, "invoice_to_dsco", orderErr.Error(), func(ctx context.Context, dscoOrderID string, reason string) error {
+				return p.orderState.MarkInvoiceManual(ctx, dscoOrderID, reason)
+			})
 			logger.Error(ctx, "invoice_order_get_failed", "job", jobNameInvoiceToDSCO, "dsco_order_id", dscoOrderID, "err", orderErr.Error())
 			continue
 		}
@@ -786,11 +901,17 @@ func (p *OrderPipeline) InvoiceToDSCO(ctx context.Context, batchSize int) error 
 		})
 		if createErr != nil {
 			_ = p.orderState.MarkInvoiceFailure(ctx, dscoOrderID, createErr.Error())
+			p.tryTurnManualOnRetryExceeded(ctx, dscoOrderID, "invoice_to_dsco", createErr.Error(), func(ctx context.Context, dscoOrderID string, reason string) error {
+				return p.orderState.MarkInvoiceManual(ctx, dscoOrderID, reason)
+			})
 			logger.Error(ctx, "invoice_create_failed", "job", jobNameInvoiceToDSCO, "dsco_order_id", dscoOrderID, "err", createErr.Error())
 			continue
 		}
 		if createResp == nil || !createResp.Success {
 			_ = p.orderState.MarkInvoiceFailure(ctx, dscoOrderID, "DSCO invoice 返回 success=false")
+			p.tryTurnManualOnRetryExceeded(ctx, dscoOrderID, "invoice_to_dsco", "DSCO invoice 返回 success=false", func(ctx context.Context, dscoOrderID string, reason string) error {
+				return p.orderState.MarkInvoiceManual(ctx, dscoOrderID, reason)
+			})
 			logger.Error(ctx, "invoice_create_failed", "job", jobNameInvoiceToDSCO, "dsco_order_id", dscoOrderID, "err", "DSCO invoice 返回 success=false")
 			continue
 		}
@@ -835,11 +956,11 @@ func buildInvoiceFromDSCOOrder(invoiceID string, o *dsco.Order, now time.Time) (
 		var unitPrice *float64
 		if li.ConsumerPrice != nil {
 			unitPrice = li.ConsumerPrice
-		} else if li.ExpectedCost != nil {
-			unitPrice = li.ExpectedCost
+		} else if li.RetailPrice != nil {
+			unitPrice = li.RetailPrice
 		}
 		if unitPrice == nil {
-			return nil, fmt.Errorf("lineItems[%d] 缺少 consumerPrice/expectedCost", i)
+			return nil, fmt.Errorf("lineItems[%d] 缺少 consumerPrice/retailPrice", i)
 		}
 
 		items = append(items, dsco.InvoiceLineItem{

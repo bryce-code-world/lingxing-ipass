@@ -11,6 +11,7 @@ func TestMapCreateOrderV2FromDSCO_Behavior(t *testing.T) {
 	t.Parallel()
 
 	price := 9.99
+	retail := 19.99
 	cases := []struct {
 		name    string
 		order   *dsco.Order
@@ -46,6 +47,22 @@ func TestMapCreateOrderV2FromDSCO_Behavior(t *testing.T) {
 				}`),
 				LineItems: []dsco.OrderLineItem{
 					{Quantity: 1, SKU: "SKU-1", ConsumerPrice: &price},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "unit_price兜底_retailPrice",
+			order: &dsco.Order{
+				DscoOrderID: "d1",
+				Shipping: json.RawMessage(`{
+					"country":"US",
+					"city":"New York",
+					"name":"Tom",
+					"address1":"Street 1"
+				}`),
+				LineItems: []dsco.OrderLineItem{
+					{Quantity: 1, SKU: "SKU-1", RetailPrice: &retail},
 				},
 			},
 			wantErr: false,

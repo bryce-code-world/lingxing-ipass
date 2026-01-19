@@ -2,6 +2,7 @@ package sync
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -108,7 +109,7 @@ func TestOrderPipeline_PullOrders_PaginatesAndAdvancesWatermark(t *testing.T) {
 
 	now := func() time.Time { return time.Date(2025, 1, 1, 0, 10, 20, 0, time.UTC) }
 
-	p, err := NewOrderPipeline(dscoCli, nil, orderState, watermark, manual, orderRaw, now)
+	p, err := NewOrderPipeline(dscoCli, nil, orderState, watermark, manual, orderRaw, now, 5, "delivered_at")
 	if err != nil {
 		t.Fatalf("NewOrderPipeline err=%v", err)
 	}
@@ -224,7 +225,7 @@ func TestOrderPipeline_PushOrdersToLingXing_Behavior(t *testing.T) {
 		WithArgs(sqlmock.AnyArg(), "g1", sqlmock.AnyArg(), "d1").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
-	p, err := NewOrderPipeline(dscoCli, lxCli, orderState, watermark, manual, orderRaw, now)
+	p, err := NewOrderPipeline(dscoCli, lxCli, orderState, watermark, manual, orderRaw, now, 5, "delivered_at")
 	if err != nil {
 		t.Fatalf("NewOrderPipeline err=%v", err)
 	}
@@ -235,6 +236,100 @@ func TestOrderPipeline_PushOrdersToLingXing_Behavior(t *testing.T) {
 	if err := p.PushOrdersToLingXing(ctx, 10009, "s1", 10); err != nil {
 		t.Fatalf("PushOrdersToLingXing err=%v", err)
 	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations err=%v", err)
+	}
+}
+
+func TestOrderPipeline_PushOrdersToLingXing_RetryExceededGoesManual(t *testing.T) {
+	t.Parallel()
+
+	// DSCO mock：回源订单直接失败（触发失败+重试上限转人工）
+	dscoSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("method=%s want=%s", r.Method, http.MethodGet)
+		}
+		if r.URL.Path != "/api/v3/order/" {
+			t.Fatalf("path=%s want=%s", r.URL.Path, "/api/v3/order/")
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = io.WriteString(w, `{"message":"server error"}`)
+	}))
+	t.Cleanup(dscoSrv.Close)
+
+	dscoCli, err := dsco.New(dsco.Config{
+		BaseURL:    dscoSrv.URL + "/api/v3",
+		HTTPClient: dscoSrv.Client(),
+		Token:      "t",
+	})
+	if err != nil {
+		t.Fatalf("dsco.New err=%v", err)
+	}
+
+	// 领星 client（本用例不应被调用，但 PushOrdersToLingXing 需要非空 client）
+	now := func() time.Time { return time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC) }
+	lxSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("unexpected lingxing call path=%s", r.URL.Path)
+	}))
+	t.Cleanup(lxSrv.Close)
+	lxCli, err := lingxing.New(lingxing.Config{
+		BaseURL:     lxSrv.URL,
+		AppID:       "1234567890abcdef",
+		AccessToken: "tok",
+		Now:         now,
+	})
+	if err != nil {
+		t.Fatalf("lingxing.New err=%v", err)
+	}
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New err=%v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	orderState, _ := store.NewOrderStateStore(db)
+	watermark, _ := store.NewWatermarkStore(db)
+	manual, _ := store.NewManualTaskStore(db)
+	orderRaw, _ := store.NewDscoOrderRawStore(db)
+
+	// ClaimForPush：BEGIN -> SELECT -> UPDATE -> COMMIT
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT dsco_order_id").
+		WithArgs(sqlmock.AnyArg(), 1).
+		WillReturnRows(sqlmock.NewRows([]string{"dsco_order_id"}).AddRow("d1"))
+	mock.ExpectExec("UPDATE sync_order_state").
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), "d1").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	// MarkPushFailure
+	mock.ExpectExec("UPDATE sync_order_state").
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), "d1").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	// retry_count 已到上限：触发转人工
+	mock.ExpectQuery("SELECT retry_count FROM sync_order_state").
+		WithArgs("d1").
+		WillReturnRows(sqlmock.NewRows([]string{"retry_count"}).AddRow(5))
+	mock.ExpectExec("INSERT INTO manual_task").
+		WithArgs("max_retry_exceeded", sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec("UPDATE sync_order_state").
+		WithArgs("max_retry_exceeded", sqlmock.AnyArg(), "d1").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	p, err := NewOrderPipeline(dscoCli, lxCli, orderState, watermark, manual, orderRaw, now, 5, "delivered_at")
+	if err != nil {
+		t.Fatalf("NewOrderPipeline err=%v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	t.Cleanup(cancel)
+
+	// batchSize=1，确保只处理一条
+	_ = p.PushOrdersToLingXing(ctx, 10009, "s1", 1)
+
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations err=%v", err)
 	}
@@ -330,7 +425,7 @@ func TestOrderPipeline_AckToDSCO_Behavior(t *testing.T) {
 		WithArgs("ack_to_dsco", []byte(`{"mode":"update_time","since":1720429064}`)).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
-	p, err := NewOrderPipeline(dscoCli, lxCli, orderState, watermark, manual, orderRaw, now)
+	p, err := NewOrderPipeline(dscoCli, lxCli, orderState, watermark, manual, orderRaw, now, 5, "delivered_at")
 	if err != nil {
 		t.Fatalf("NewOrderPipeline err=%v", err)
 	}
@@ -362,6 +457,16 @@ func TestOrderPipeline_ShipToDSCO_Behavior(t *testing.T) {
 			t.Fatalf("path=%s want=%s", r.URL.Path, "/api/v3/order/singleShipment")
 		}
 		shipCalls++
+		var body dsco.ShipmentsForUpdate
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode body err=%v", err)
+		}
+		if body.DscoOrderID != "d1" || len(body.Shipments) != 1 || body.Shipments[0].TrackingNumber != "TN1" {
+			t.Fatalf("body=%+v", body)
+		}
+		if body.Shipments[0].ShipDate != "2021-01-01T00:00:00Z" {
+			t.Fatalf("ShipDate=%q want %q", body.Shipments[0].ShipDate, "2021-01-01T00:00:00Z")
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"success":true}`)
 	}))
@@ -385,7 +490,7 @@ func TestOrderPipeline_ShipToDSCO_Behavior(t *testing.T) {
 			_, _ = io.WriteString(w, `{"code":0,"message":"success","data":{"total":1,"list":[{"platform_info":[{"platform_order_no":"d1"}]}]}}`)
 		case "/erp/sc/routing/wms/order/wmsOrderList":
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = io.WriteString(w, `{"code":0,"message":"success","data":[{"platform_order_no":["d1"],"tracking_no":"TN1","product_info":[{"sku":"SKU-1","count":1}]}],"total":1}`)
+			_, _ = io.WriteString(w, `{"code":0,"message":"success","data":[{"platform_order_no":["d1"],"tracking_no":"TN1","delivered_at":"2021-01-01 00:00:00","product_info":[{"sku":"SKU-1","count":1}]}],"total":1}`)
 		default:
 			t.Fatalf("unexpected path=%s", r.URL.Path)
 		}
@@ -441,7 +546,7 @@ func TestOrderPipeline_ShipToDSCO_Behavior(t *testing.T) {
 		WithArgs("ship_to_dsco", []byte(`{"mode":"update_time","since":1720429064}`)).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
-	p, err := NewOrderPipeline(dscoCli, lxCli, orderState, watermark, manual, orderRaw, now)
+	p, err := NewOrderPipeline(dscoCli, lxCli, orderState, watermark, manual, orderRaw, now, 5, "delivered_at")
 	if err != nil {
 		t.Fatalf("NewOrderPipeline err=%v", err)
 	}
@@ -552,7 +657,7 @@ func TestOrderPipeline_InvoiceToDSCO_Behavior(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	now := func() time.Time { return time.Unix(1720429074, 0) }
-	p, err := NewOrderPipeline(dscoCli, nil, orderState, watermark, manual, orderRaw, now)
+	p, err := NewOrderPipeline(dscoCli, nil, orderState, watermark, manual, orderRaw, now, 5, "delivered_at")
 	if err != nil {
 		t.Fatalf("NewOrderPipeline err=%v", err)
 	}
@@ -565,6 +670,99 @@ func TestOrderPipeline_InvoiceToDSCO_Behavior(t *testing.T) {
 	}
 	if getInvoiceCalls != 1 || getOrderCalls != 1 || postInvoiceCalls != 1 {
 		t.Fatalf("calls invoice_get=%d order_get=%d invoice_post=%d", getInvoiceCalls, getOrderCalls, postInvoiceCalls)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations err=%v", err)
+	}
+}
+
+func TestOrderPipeline_InvoiceToDSCO_UsesRetailPriceFallback(t *testing.T) {
+	t.Parallel()
+
+	// DSCO mock：GET /invoice -> empty, GET /order/ -> order(retailPrice), POST /invoice -> success
+	var getInvoiceCalls, getOrderCalls, postInvoiceCalls int
+	dscoSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v3/invoice":
+			switch r.Method {
+			case http.MethodGet:
+				getInvoiceCalls++
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, `{"invoices":[]}`)
+			case http.MethodPost:
+				postInvoiceCalls++
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusCreated)
+				_, _ = io.WriteString(w, `{"success":true}`)
+			default:
+				t.Fatalf("method=%s unexpected", r.Method)
+			}
+		case "/api/v3/order/":
+			if r.Method != http.MethodGet {
+				t.Fatalf("method=%s want=%s", r.Method, http.MethodGet)
+			}
+			getOrderCalls++
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{
+				"dscoOrderId":"d1",
+				"currencyCode":"USD",
+				"lineItems":[{"quantity":2,"sku":"SKU-1","retailPrice":10.0}]
+			}`)
+		default:
+			t.Fatalf("unexpected path=%s", r.URL.Path)
+		}
+	}))
+	t.Cleanup(dscoSrv.Close)
+
+	dscoCli, err := dsco.New(dsco.Config{
+		BaseURL:    dscoSrv.URL + "/api/v3",
+		HTTPClient: dscoSrv.Client(),
+		Token:      "t",
+	})
+	if err != nil {
+		t.Fatalf("dsco.New err=%v", err)
+	}
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New err=%v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	orderState, _ := store.NewOrderStateStore(db)
+	watermark, _ := store.NewWatermarkStore(db)
+	manual, _ := store.NewManualTaskStore(db)
+	orderRaw, _ := store.NewDscoOrderRawStore(db)
+
+	// ClaimForInvoice：BEGIN -> SELECT -> UPDATE -> COMMIT
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT dsco_order_id").
+		WithArgs(sqlmock.AnyArg(), 1).
+		WillReturnRows(sqlmock.NewRows([]string{"dsco_order_id"}).AddRow("d1"))
+	mock.ExpectExec("UPDATE sync_order_state").
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), "d1").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	// MarkInvoiceSuccess
+	mock.ExpectExec("UPDATE sync_order_state").
+		WithArgs(sqlmock.AnyArg(), "INV-d1", sqlmock.AnyArg(), "d1").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	now := func() time.Time { return time.Date(2025, 1, 1, 0, 10, 20, 0, time.UTC) }
+	p, err := NewOrderPipeline(dscoCli, nil, orderState, watermark, manual, orderRaw, now, 5, "delivered_at")
+	if err != nil {
+		t.Fatalf("NewOrderPipeline err=%v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	t.Cleanup(cancel)
+
+	if err := p.InvoiceToDSCO(ctx, 1); err != nil {
+		t.Fatalf("InvoiceToDSCO err=%v", err)
+	}
+	if getInvoiceCalls != 1 || getOrderCalls != 1 || postInvoiceCalls != 1 {
+		t.Fatalf("calls getInvoice=%d getOrder=%d postInvoice=%d", getInvoiceCalls, getOrderCalls, postInvoiceCalls)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("expectations err=%v", err)

@@ -510,3 +510,278 @@ WHERE dsco_order_id = ?
 `, reason, now, dscoOrderID)
 	return err
 }
+
+// GetRetryCount 返回某个 dscoOrderId 的 retry_count；若不存在返回 ok=false。
+func (s *OrderStateStore) GetRetryCount(ctx context.Context, dscoOrderID string) (retryCount int, ok bool, err error) {
+	dscoOrderID = strings.TrimSpace(dscoOrderID)
+	if dscoOrderID == "" {
+		return 0, false, errors.New("dscoOrderID 不能为空")
+	}
+	var n int
+	err = s.db.QueryRowContext(ctx, `SELECT retry_count FROM sync_order_state WHERE dsco_order_id = ?`, dscoOrderID).Scan(&n)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, false, nil
+		}
+		return 0, false, err
+	}
+	return n, true, nil
+}
+
+// OrderStateRow 表示 sync_order_state 的查询结果（用于管理端展示）。
+type OrderStateRow struct {
+	DscoOrderID           string     `json:"dsco_order_id"`
+	LingxingGlobalOrderNo *string    `json:"lingxing_global_order_no,omitempty"`
+	PushedToLXStatus      int        `json:"pushed_to_lx_status"`
+	PushedToLXAt          *time.Time `json:"pushed_to_lx_at,omitempty"`
+	AckedToDSCOStatus     int        `json:"acked_to_dsco_status"`
+	AckedToDSCOAt         *time.Time `json:"acked_to_dsco_at,omitempty"`
+	ShippedToDSCOStatus   int        `json:"shipped_to_dsco_status"`
+	ShippedToDSCOAt       *time.Time `json:"shipped_to_dsco_at,omitempty"`
+	ShippedTrackingNo     *string    `json:"shipped_tracking_no,omitempty"`
+	InvoicedToDSCOStatus  int        `json:"invoiced_to_dsco_status"`
+	InvoicedToDSCOAt      *time.Time `json:"invoiced_to_dsco_at,omitempty"`
+	DscoInvoiceID         *string    `json:"dsco_invoice_id,omitempty"`
+	RetryCount            int        `json:"retry_count"`
+	LastError             *string    `json:"last_error,omitempty"`
+	LastAttemptAt         *time.Time `json:"last_attempt_at,omitempty"`
+	CreatedAt             time.Time  `json:"created_at"`
+	UpdatedAt             time.Time  `json:"updated_at"`
+}
+
+// GetByDscoOrderID 查询单条订单状态；若不存在返回 ok=false。
+func (s *OrderStateStore) GetByDscoOrderID(ctx context.Context, dscoOrderID string) (*OrderStateRow, bool, error) {
+	dscoOrderID = strings.TrimSpace(dscoOrderID)
+	if dscoOrderID == "" {
+		return nil, false, errors.New("dscoOrderID 不能为空")
+	}
+
+	var (
+		lingxingGlobalOrderNo sql.NullString
+		pushedToLXAt          sql.NullTime
+		ackedToDSCOAt         sql.NullTime
+		shippedToDSCOAt       sql.NullTime
+		shippedTrackingNo     sql.NullString
+		invoicedToDSCOAt      sql.NullTime
+		dscoInvoiceID         sql.NullString
+		lastError             sql.NullString
+		lastAttemptAt         sql.NullTime
+
+		row OrderStateRow
+	)
+	err := s.db.QueryRowContext(ctx, `
+SELECT dsco_order_id,
+       lingxing_global_order_no,
+       pushed_to_lx_status, pushed_to_lx_at,
+       acked_to_dsco_status, acked_to_dsco_at,
+       shipped_to_dsco_status, shipped_to_dsco_at, shipped_tracking_no,
+       invoiced_to_dsco_status, invoiced_to_dsco_at, dsco_invoice_id,
+       retry_count, last_error, last_attempt_at,
+       created_at, updated_at
+FROM sync_order_state
+WHERE dsco_order_id = ?
+`, dscoOrderID).Scan(
+		&row.DscoOrderID,
+		&lingxingGlobalOrderNo,
+		&row.PushedToLXStatus, &pushedToLXAt,
+		&row.AckedToDSCOStatus, &ackedToDSCOAt,
+		&row.ShippedToDSCOStatus, &shippedToDSCOAt, &shippedTrackingNo,
+		&row.InvoicedToDSCOStatus, &invoicedToDSCOAt, &dscoInvoiceID,
+		&row.RetryCount, &lastError, &lastAttemptAt,
+		&row.CreatedAt, &row.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+
+	if lingxingGlobalOrderNo.Valid {
+		v := strings.TrimSpace(lingxingGlobalOrderNo.String)
+		if v != "" {
+			row.LingxingGlobalOrderNo = &v
+		}
+	}
+	if pushedToLXAt.Valid {
+		v := pushedToLXAt.Time
+		row.PushedToLXAt = &v
+	}
+	if ackedToDSCOAt.Valid {
+		v := ackedToDSCOAt.Time
+		row.AckedToDSCOAt = &v
+	}
+	if shippedToDSCOAt.Valid {
+		v := shippedToDSCOAt.Time
+		row.ShippedToDSCOAt = &v
+	}
+	if shippedTrackingNo.Valid {
+		v := strings.TrimSpace(shippedTrackingNo.String)
+		if v != "" {
+			row.ShippedTrackingNo = &v
+		}
+	}
+	if invoicedToDSCOAt.Valid {
+		v := invoicedToDSCOAt.Time
+		row.InvoicedToDSCOAt = &v
+	}
+	if dscoInvoiceID.Valid {
+		v := strings.TrimSpace(dscoInvoiceID.String)
+		if v != "" {
+			row.DscoInvoiceID = &v
+		}
+	}
+	if lastError.Valid {
+		v := strings.TrimSpace(lastError.String)
+		if v != "" {
+			row.LastError = &v
+		}
+	}
+	if lastAttemptAt.Valid {
+		v := lastAttemptAt.Time
+		row.LastAttemptAt = &v
+	}
+
+	return &row, true, nil
+}
+
+type OrderStateListQuery struct {
+	PushedToLXStatus     *int
+	AckedToDSCOStatus    *int
+	ShippedToDSCOStatus  *int
+	InvoicedToDSCOStatus *int
+	Limit                int
+	Offset               int
+}
+
+// List 查询订单状态列表（一期最小分页 + 可选按状态过滤）。
+func (s *OrderStateStore) List(ctx context.Context, q OrderStateListQuery) ([]OrderStateRow, error) {
+	if q.Limit <= 0 {
+		q.Limit = 50
+	}
+	if q.Limit > 200 {
+		q.Limit = 200
+	}
+	if q.Offset < 0 {
+		q.Offset = 0
+	}
+
+	var sb strings.Builder
+	sb.WriteString(`
+SELECT dsco_order_id,
+       lingxing_global_order_no,
+       pushed_to_lx_status, pushed_to_lx_at,
+       acked_to_dsco_status, acked_to_dsco_at,
+       shipped_to_dsco_status, shipped_to_dsco_at, shipped_tracking_no,
+       invoiced_to_dsco_status, invoiced_to_dsco_at, dsco_invoice_id,
+       retry_count, last_error, last_attempt_at,
+       created_at, updated_at
+FROM sync_order_state
+WHERE 1=1
+`)
+	args := make([]any, 0, 8)
+	if q.PushedToLXStatus != nil {
+		sb.WriteString(" AND pushed_to_lx_status = ?\n")
+		args = append(args, *q.PushedToLXStatus)
+	}
+	if q.AckedToDSCOStatus != nil {
+		sb.WriteString(" AND acked_to_dsco_status = ?\n")
+		args = append(args, *q.AckedToDSCOStatus)
+	}
+	if q.ShippedToDSCOStatus != nil {
+		sb.WriteString(" AND shipped_to_dsco_status = ?\n")
+		args = append(args, *q.ShippedToDSCOStatus)
+	}
+	if q.InvoicedToDSCOStatus != nil {
+		sb.WriteString(" AND invoiced_to_dsco_status = ?\n")
+		args = append(args, *q.InvoicedToDSCOStatus)
+	}
+	sb.WriteString(" ORDER BY updated_at DESC\n LIMIT ? OFFSET ?\n")
+	args = append(args, q.Limit, q.Offset)
+
+	rows, err := s.db.QueryContext(ctx, sb.String(), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []OrderStateRow
+	for rows.Next() {
+		var (
+			lingxingGlobalOrderNo sql.NullString
+			pushedToLXAt          sql.NullTime
+			ackedToDSCOAt         sql.NullTime
+			shippedToDSCOAt       sql.NullTime
+			shippedTrackingNo     sql.NullString
+			invoicedToDSCOAt      sql.NullTime
+			dscoInvoiceID         sql.NullString
+			lastError             sql.NullString
+			lastAttemptAt         sql.NullTime
+
+			r OrderStateRow
+		)
+		if err := rows.Scan(
+			&r.DscoOrderID,
+			&lingxingGlobalOrderNo,
+			&r.PushedToLXStatus, &pushedToLXAt,
+			&r.AckedToDSCOStatus, &ackedToDSCOAt,
+			&r.ShippedToDSCOStatus, &shippedToDSCOAt, &shippedTrackingNo,
+			&r.InvoicedToDSCOStatus, &invoicedToDSCOAt, &dscoInvoiceID,
+			&r.RetryCount, &lastError, &lastAttemptAt,
+			&r.CreatedAt, &r.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+
+		if lingxingGlobalOrderNo.Valid {
+			v := strings.TrimSpace(lingxingGlobalOrderNo.String)
+			if v != "" {
+				r.LingxingGlobalOrderNo = &v
+			}
+		}
+		if pushedToLXAt.Valid {
+			v := pushedToLXAt.Time
+			r.PushedToLXAt = &v
+		}
+		if ackedToDSCOAt.Valid {
+			v := ackedToDSCOAt.Time
+			r.AckedToDSCOAt = &v
+		}
+		if shippedToDSCOAt.Valid {
+			v := shippedToDSCOAt.Time
+			r.ShippedToDSCOAt = &v
+		}
+		if shippedTrackingNo.Valid {
+			v := strings.TrimSpace(shippedTrackingNo.String)
+			if v != "" {
+				r.ShippedTrackingNo = &v
+			}
+		}
+		if invoicedToDSCOAt.Valid {
+			v := invoicedToDSCOAt.Time
+			r.InvoicedToDSCOAt = &v
+		}
+		if dscoInvoiceID.Valid {
+			v := strings.TrimSpace(dscoInvoiceID.String)
+			if v != "" {
+				r.DscoInvoiceID = &v
+			}
+		}
+		if lastError.Valid {
+			v := strings.TrimSpace(lastError.String)
+			if v != "" {
+				r.LastError = &v
+			}
+		}
+		if lastAttemptAt.Valid {
+			v := lastAttemptAt.Time
+			r.LastAttemptAt = &v
+		}
+
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}

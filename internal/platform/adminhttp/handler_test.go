@@ -30,8 +30,12 @@ func TestHandler_WatermarkSetAndGet_Behavior(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewManualTaskStore err=%v", err)
 	}
+	order, err := store.NewOrderStateStore(db)
+	if err != nil {
+		t.Fatalf("NewOrderStateStore err=%v", err)
+	}
 
-	h, err := NewHandler(wm, manual, nil)
+	h, err := NewHandler(wm, manual, order, nil)
 	if err != nil {
 		t.Fatalf("NewHandler err=%v", err)
 	}
@@ -77,9 +81,10 @@ func TestHandler_RunJob_Behavior(t *testing.T) {
 
 	wm, _ := store.NewWatermarkStore(db)
 	manual, _ := store.NewManualTaskStore(db)
+	order, _ := store.NewOrderStateStore(db)
 
 	var called bool
-	h, err := NewHandler(wm, manual, map[string]JobRunner{
+	h, err := NewHandler(wm, manual, order, map[string]JobRunner{
 		"heartbeat": func(ctx context.Context) error {
 			called = true
 			return nil
@@ -112,8 +117,9 @@ func TestHandler_ManualTasks_Behavior(t *testing.T) {
 
 	wm, _ := store.NewWatermarkStore(db)
 	manual, _ := store.NewManualTaskStore(db)
+	order, _ := store.NewOrderStateStore(db)
 
-	h, err := NewHandler(wm, manual, nil)
+	h, err := NewHandler(wm, manual, order, nil)
 	if err != nil {
 		t.Fatalf("NewHandler err=%v", err)
 	}
@@ -125,6 +131,112 @@ func TestHandler_ManualTasks_Behavior(t *testing.T) {
 			AddRow(int64(1), "bad_payload", "d1", []byte(`{"a":1}`), 0, now, now))
 
 	req := httptest.NewRequest(http.MethodGet, "/admin/manual_tasks?status=0&limit=50&offset=0", nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("code=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations err=%v", err)
+	}
+}
+
+func TestHandler_OrderStateGet_Behavior(t *testing.T) {
+	t.Parallel()
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New err=%v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	wm, _ := store.NewWatermarkStore(db)
+	manual, _ := store.NewManualTaskStore(db)
+	order, _ := store.NewOrderStateStore(db)
+
+	h, err := NewHandler(wm, manual, order, nil)
+	if err != nil {
+		t.Fatalf("NewHandler err=%v", err)
+	}
+
+	now := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	mock.ExpectQuery("SELECT dsco_order_id").
+		WithArgs("d1").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"dsco_order_id",
+			"lingxing_global_order_no",
+			"pushed_to_lx_status", "pushed_to_lx_at",
+			"acked_to_dsco_status", "acked_to_dsco_at",
+			"shipped_to_dsco_status", "shipped_to_dsco_at", "shipped_tracking_no",
+			"invoiced_to_dsco_status", "invoiced_to_dsco_at", "dsco_invoice_id",
+			"retry_count", "last_error", "last_attempt_at",
+			"created_at", "updated_at",
+		}).AddRow(
+			"d1",
+			"g1",
+			1, now,
+			0, nil,
+			0, nil, nil,
+			0, nil, nil,
+			3, "e1", now,
+			now, now,
+		))
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/order_state/get?dsco_order_id=d1", nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("code=%d body=%s", rr.Code, rr.Body.String())
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("expectations err=%v", err)
+	}
+}
+
+func TestHandler_OrderStatesList_Behavior(t *testing.T) {
+	t.Parallel()
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New err=%v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	wm, _ := store.NewWatermarkStore(db)
+	manual, _ := store.NewManualTaskStore(db)
+	order, _ := store.NewOrderStateStore(db)
+
+	h, err := NewHandler(wm, manual, order, nil)
+	if err != nil {
+		t.Fatalf("NewHandler err=%v", err)
+	}
+
+	now := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	mock.ExpectQuery("FROM sync_order_state").
+		WithArgs(2, 50, 0).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"dsco_order_id",
+			"lingxing_global_order_no",
+			"pushed_to_lx_status", "pushed_to_lx_at",
+			"acked_to_dsco_status", "acked_to_dsco_at",
+			"shipped_to_dsco_status", "shipped_to_dsco_at", "shipped_tracking_no",
+			"invoiced_to_dsco_status", "invoiced_to_dsco_at", "dsco_invoice_id",
+			"retry_count", "last_error", "last_attempt_at",
+			"created_at", "updated_at",
+		}).AddRow(
+			"d1",
+			nil,
+			2, nil,
+			0, nil,
+			0, nil, nil,
+			0, nil, nil,
+			1, "e1", now,
+			now, now,
+		))
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/order_states?push_status=2&limit=50&offset=0", nil)
 	rr := httptest.NewRecorder()
 	h.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {

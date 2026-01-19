@@ -38,6 +38,8 @@
 - `.env.example`
 
 关键配置项（节选）：
+
+系统配置（基础设施/可靠性/外部系统）：
 - `IPASS_DB_DSN`：MySQL DSN
 - `IPASS_LOG_DIR`：日志目录（默认 `logs/`）
 - `IPASS_HTTP_ENABLE` / `IPASS_HTTP_ADDR`：HTTP 管理端开关与监听地址
@@ -45,8 +47,12 @@
 - `IPASS_LINGXING_BASE_URL` / `IPASS_LINGXING_APP_ID` / `IPASS_LINGXING_ACCESS_TOKEN`：领星 OpenAPI 配置
 - `IPASS_LINGXING_PLATFORM_CODE` / `IPASS_LINGXING_STORE_ID`：推单固定参数（一期写死在配置）
 - `IPASS_LINGXING_SID`：WMS 出库单查询参数（`sid_arr`）
+- `IPASS_MAX_RETRY_PER_ORDER`：同一 dscoOrderId 单环节最大重试次数（默认 5，达到上限转人工）
+
+业务配置（口径/映射/可随业务调整）：
 - `IPASS_STOCK_WID_TO_DSCO_WAREHOUSE_CODE_JSON`：库存同步必填映射（领星 WID -> DSCO warehouseCode）
 - `IPASS_STOCK_SKU_TO_DSCO_SKU_JSON`：库存同步可选映射（领星 SKU -> DSCO SKU）
+- `IPASS_SHIP_DATE_SOURCE`：发货回传 shipDate 取值来源（`delivered_at`/`stock_delivered_at`/`none`）
 
 任务开关与间隔（示例）：
 - `IPASS_JOB_PULL_DSCO_ORDERS_ENABLE` / `IPASS_JOB_PULL_DSCO_ORDERS_INTERVAL_SEC`
@@ -59,7 +65,7 @@
 ## 启动
 
 在项目根目录执行：
-- `go run ./cmd/ipass`
+- `go run ./cmd/ipass/main.go`
 
 ## HTTP 管理端（一期最小运维面）
 
@@ -68,6 +74,8 @@
 接口清单：
 - `GET /healthz`：健康检查
 - `POST /admin/run?job=...`：手动触发一次指定 job（同步执行）
+- `GET /admin/order_state/get?dsco_order_id=...`：按 dscoOrderId 查询订单闭环状态（含 last_error、retry_count 等）
+- `GET /admin/order_states?push_status=&ack_status=&ship_status=&invoice_status=&limit=&offset=`：按状态筛选列表（最小分页）
 - `GET /admin/watermark/get?job=...`：获取某个 job 的水位（返回 JSON）
 - `POST /admin/watermark/set?job=...`：设置某个 job 的水位（请求体为 JSON，直接写入 `job_watermark.watermark`）
 - `GET /admin/manual_tasks?status=0&limit=50&offset=0`：查看人工任务队列
@@ -83,6 +91,7 @@
 说明：
 - 水位默认从 `0` 开始；当领星订单列表水位为 `0` 时，会按“最近 30 天”裁剪查询窗口（领星接口时间跨度限制）。
 - HTTP 请求可通过请求头 `X-Trace-Id` 传入 trace id；不传则自动生成。
+- 当某个环节对同一 `dscoOrderId` 的处理失败次数达到 `IPASS_MAX_RETRY_PER_ORDER`，系统会创建 `manual_task(task_type=max_retry_exceeded)` 并将该环节状态置为人工（3）。
 
 ## 日志
 

@@ -20,20 +20,24 @@ type JobRunner func(ctx context.Context) error
 type Handler struct {
 	watermark *store.WatermarkStore
 	manual    *store.ManualTaskStore
+	order     *store.OrderStateStore
 	runners   map[string]JobRunner
 }
 
-func NewHandler(watermark *store.WatermarkStore, manual *store.ManualTaskStore, runners map[string]JobRunner) (*Handler, error) {
+func NewHandler(watermark *store.WatermarkStore, manual *store.ManualTaskStore, order *store.OrderStateStore, runners map[string]JobRunner) (*Handler, error) {
 	if watermark == nil {
 		return nil, errors.New("watermark 不能为空")
 	}
 	if manual == nil {
 		return nil, errors.New("manual 不能为空")
 	}
+	if order == nil {
+		return nil, errors.New("order 不能为空")
+	}
 	if runners == nil {
 		runners = map[string]JobRunner{}
 	}
-	return &Handler{watermark: watermark, manual: manual, runners: runners}, nil
+	return &Handler{watermark: watermark, manual: manual, order: order, runners: runners}, nil
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -44,6 +48,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	case r.URL.Path == "/admin/run" && r.Method == http.MethodPost:
 		h.handleRun(ctx, w, r)
+		return
+	case r.URL.Path == "/admin/order_state/get" && r.Method == http.MethodGet:
+		h.handleOrderStateGet(ctx, w, r)
+		return
+	case r.URL.Path == "/admin/order_states" && r.Method == http.MethodGet:
+		h.handleOrderStates(ctx, w, r)
 		return
 	case r.URL.Path == "/admin/watermark/get" && r.Method == http.MethodGet:
 		h.handleWatermarkGet(ctx, w, r)
@@ -144,6 +154,67 @@ func (h *Handler) handleWatermarkSet(ctx context.Context, w http.ResponseWriter,
 	h.writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
+func (h *Handler) handleOrderStateGet(ctx context.Context, w http.ResponseWriter, r *http.Request) {
+	dscoOrderID := strings.TrimSpace(r.URL.Query().Get("dsco_order_id"))
+	if dscoOrderID == "" {
+		dscoOrderID = strings.TrimSpace(r.URL.Query().Get("dscoOrderId"))
+	}
+	if dscoOrderID == "" {
+		h.writeJSON(w, http.StatusBadRequest, map[string]any{"error": "missing dsco_order_id"})
+		return
+	}
+	row, ok, err := h.order.GetByDscoOrderID(ctx, dscoOrderID)
+	if err != nil {
+		h.writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	if !ok {
+		h.writeJSON(w, http.StatusNotFound, map[string]any{"error": "not found"})
+		return
+	}
+	h.writeJSON(w, http.StatusOK, row)
+}
+
+func (h *Handler) handleOrderStates(ctx context.Context, w http.ResponseWriter, r *http.Request) {
+	limit := mustInt(r.URL.Query().Get("limit"), 50)
+	offset := mustInt(r.URL.Query().Get("offset"), 0)
+
+	pushedStatus, ok := optionalInt(r.URL.Query().Get("push_status"))
+	var pushedPtr *int
+	if ok {
+		pushedPtr = &pushedStatus
+	}
+	ackedStatus, ok := optionalInt(r.URL.Query().Get("ack_status"))
+	var ackedPtr *int
+	if ok {
+		ackedPtr = &ackedStatus
+	}
+	shippedStatus, ok := optionalInt(r.URL.Query().Get("ship_status"))
+	var shippedPtr *int
+	if ok {
+		shippedPtr = &shippedStatus
+	}
+	invoicedStatus, ok := optionalInt(r.URL.Query().Get("invoice_status"))
+	var invoicedPtr *int
+	if ok {
+		invoicedPtr = &invoicedStatus
+	}
+
+	items, err := h.order.List(ctx, store.OrderStateListQuery{
+		PushedToLXStatus:     pushedPtr,
+		AckedToDSCOStatus:    ackedPtr,
+		ShippedToDSCOStatus:  shippedPtr,
+		InvoicedToDSCOStatus: invoicedPtr,
+		Limit:                limit,
+		Offset:               offset,
+	})
+	if err != nil {
+		h.writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+	h.writeJSON(w, http.StatusOK, map[string]any{"items": items, "count": len(items)})
+}
+
 func (h *Handler) handleManualTasks(ctx context.Context, w http.ResponseWriter, r *http.Request) {
 	status := mustInt(r.URL.Query().Get("status"), 0)
 	limit := mustInt(r.URL.Query().Get("limit"), 50)
@@ -167,6 +238,18 @@ func mustInt(raw string, def int) int {
 		return def
 	}
 	return n
+}
+
+func optionalInt(raw string) (int, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, false
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, false
+	}
+	return n, true
 }
 
 func (h *Handler) writeJSON(w http.ResponseWriter, status int, v any) {

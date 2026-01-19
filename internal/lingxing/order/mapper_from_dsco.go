@@ -27,7 +27,7 @@ type dscoShipping struct {
 //
 // 一期原则：
 // - 缺必填字段直接失败，交给上层写 manual_task 转人工
-// - unit_price 优先取 consumerPrice，缺失时用 expectedCost 兜底
+// - unit_price 优先取 consumerPrice，缺失时用 retailPrice 兜底（口径以 DSCO API spec 为准）
 func MapCreateOrderV2FromDSCO(o *dsco.Order) (lingxing.CreateOrderV2, error) {
 	if o == nil {
 		return lingxing.CreateOrderV2{}, errors.New("dscoOrder 不能为空")
@@ -94,11 +94,11 @@ func MapCreateOrderV2FromDSCO(o *dsco.Order) (lingxing.CreateOrderV2, error) {
 		var unitPrice *float64
 		if li.ConsumerPrice != nil {
 			unitPrice = li.ConsumerPrice
-		} else if li.ExpectedCost != nil {
-			unitPrice = li.ExpectedCost
+		} else if li.RetailPrice != nil {
+			unitPrice = li.RetailPrice
 		}
 		if unitPrice == nil {
-			return lingxing.CreateOrderV2{}, fmt.Errorf("lineItems[%d] 缺少 consumerPrice/expectedCost", i)
+			return lingxing.CreateOrderV2{}, fmt.Errorf("lineItems[%d] 缺少 consumerPrice/retailPrice", i)
 		}
 
 		items = append(items, lingxing.CreateOrderItemV2{

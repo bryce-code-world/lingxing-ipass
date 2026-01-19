@@ -2,3 +2,4 @@ golib
 logs/
 **/logs/
 *.log
+.env
