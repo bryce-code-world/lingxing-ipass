@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -76,11 +77,11 @@ func main() {
 
 	runners := map[string]adminhttp.JobRunner{}
 
-	needDSCO := cfg.System.Jobs.PullDSCOOrdersEnable || cfg.System.Jobs.PushOrdersToLingXingEnable || cfg.System.Jobs.AckToDSCOEnable || cfg.System.Jobs.ShipToDSCOEnable || cfg.System.Jobs.InvoiceToDSCOEnable || cfg.System.Jobs.SyncStockEnable
-	needLingXing := cfg.System.Jobs.PushOrdersToLingXingEnable || cfg.System.Jobs.AckToDSCOEnable || cfg.System.Jobs.ShipToDSCOEnable || cfg.System.Jobs.SyncStockEnable
+	hasDSCO := strings.TrimSpace(cfg.System.DSCO.Token) != ""
+	hasLingXing := strings.TrimSpace(cfg.System.LingXing.AppID) != "" && strings.TrimSpace(cfg.System.LingXing.AccessToken) != ""
 
 	var dscoCli *dsco.Client
-	if needDSCO {
+	if hasDSCO {
 		dscoCli, err = dsco.New(dsco.Config{
 			BaseURL: cfg.System.DSCO.BaseURL,
 			Token:   cfg.System.DSCO.Token,
@@ -91,7 +92,7 @@ func main() {
 	}
 
 	var lxCli *lingxing.Client
-	if needLingXing {
+	if hasLingXing {
 		lxCli, err = lingxing.New(lingxing.Config{
 			BaseURL:     cfg.System.LingXing.BaseURL,
 			AppID:       cfg.System.LingXing.AppID,
@@ -103,37 +104,85 @@ func main() {
 	}
 
 	var p *sync.OrderPipeline
-	if needDSCO {
+	if dscoCli != nil {
 		p, err = sync.NewOrderPipeline(dscoCli, lxCli, orderState, watermark, manual, orderRaw, time.Now, cfg.System.Reliability.MaxRetryPerOrder, cfg.Biz.Shipment.ShipDateSource)
 		if err != nil {
 			log.Fatalf("初始化 OrderPipeline 失败: %v", err)
 		}
 	}
 
-	if p != nil {
-		runners["pull_dsco_orders"] = func(ctx context.Context) error { return p.PullOrders(ctx) }
-		runners["push_orders_to_lingxing"] = func(ctx context.Context) error {
-			return p.PushOrdersToLingXing(ctx, cfg.System.LingXing.PlatformCode, cfg.System.LingXing.StoreID, cfg.System.Jobs.PushOrdersToLingXingBatchSize)
-		}
-		runners["ack_to_dsco"] = func(ctx context.Context) error {
-			return p.AckToDSCO(ctx, cfg.System.LingXing.PlatformCode, cfg.System.LingXing.StoreID)
-		}
-		runners["ship_to_dsco"] = func(ctx context.Context) error {
-			return p.ShipToDSCO(ctx, cfg.System.LingXing.PlatformCode, cfg.System.LingXing.StoreID, cfg.System.LingXing.SID)
-		}
-		runners["invoice_to_dsco"] = func(ctx context.Context) error { return p.InvoiceToDSCO(ctx, cfg.System.Jobs.InvoiceToDSCOBatchSize) }
-	}
+
 
 	var sp *sync.StockPipeline
-	if cfg.System.Jobs.SyncStockEnable {
+	if dscoCli != nil && lxCli != nil && len(cfg.Biz.Stock.LingXingWIDToDSCOWarehouseCode) > 0 {
 		sp, err = sync.NewStockPipeline(dscoCli, lxCli, manual, cfg.Biz.Stock.LingXingWIDToDSCOWarehouseCode, cfg.Biz.Stock.LingXingSKUToDSCOSKU)
 		if err != nil {
 			log.Fatalf("初始化 StockPipeline 失败: %v", err)
 		}
-		runners["sync_stock"] = func(ctx context.Context) error { return sp.SyncStock(ctx, cfg.System.Jobs.SyncStockBatchSize) }
 	}
 
 	// 调度任务接入
+	// ops 手动触发：无论定时任务开关是否启用，都必须注册标准 job 名称，避免返回 unknown job。
+	registerStandardOpsRunners(runners, opsRunnerDeps{
+		PullDSCOOrders: func(ctx context.Context) error {
+			if p == nil {
+				return errors.New("未配置 IPASS_DSCO_TOKEN，无法执行 pull_dsco_orders")
+			}
+			return p.PullOrders(ctx)
+		},
+		PushOrdersToLingXing: func(ctx context.Context) error {
+			if p == nil {
+				return errors.New("未配置 IPASS_DSCO_TOKEN，无法执行 push_orders_to_lingxing")
+			}
+			if lxCli == nil {
+				return errors.New("未配置 IPASS_LINGXING_APP_ID / IPASS_LINGXING_ACCESS_TOKEN，无法执行 push_orders_to_lingxing")
+			}
+			return p.PushOrdersToLingXing(ctx, cfg.System.LingXing.PlatformCode, cfg.System.LingXing.StoreID, cfg.System.Jobs.PushOrdersToLingXingBatchSize)
+		},
+		AckToDSCO: func(ctx context.Context) error {
+			if p == nil {
+				return errors.New("未配置 IPASS_DSCO_TOKEN，无法执行 ack_to_dsco")
+			}
+			if lxCli == nil {
+				return errors.New("未配置 IPASS_LINGXING_APP_ID / IPASS_LINGXING_ACCESS_TOKEN，无法执行 ack_to_dsco")
+			}
+			return p.AckToDSCO(ctx, cfg.System.LingXing.PlatformCode, cfg.System.LingXing.StoreID)
+		},
+		ShipToDSCO: func(ctx context.Context) error {
+			if p == nil {
+				return errors.New("未配置 IPASS_DSCO_TOKEN，无法执行 ship_to_dsco")
+			}
+			if lxCli == nil {
+				return errors.New("未配置 IPASS_LINGXING_APP_ID / IPASS_LINGXING_ACCESS_TOKEN，无法执行 ship_to_dsco")
+			}
+			if cfg.System.LingXing.SID <= 0 {
+				return errors.New("未配置 IPASS_LINGXING_SID，无法执行 ship_to_dsco")
+			}
+			return p.ShipToDSCO(ctx, cfg.System.LingXing.PlatformCode, cfg.System.LingXing.StoreID, cfg.System.LingXing.SID)
+		},
+		InvoiceToDSCO: func(ctx context.Context) error {
+			if p == nil {
+				return errors.New("未配置 IPASS_DSCO_TOKEN，无法执行 invoice_to_dsco")
+			}
+			return p.InvoiceToDSCO(ctx, cfg.System.Jobs.InvoiceToDSCOBatchSize)
+		},
+		SyncStock: func(ctx context.Context) error {
+			if dscoCli == nil {
+				return errors.New("未配置 IPASS_DSCO_TOKEN，无法执行 sync_stock")
+			}
+			if lxCli == nil {
+				return errors.New("未配置 IPASS_LINGXING_APP_ID / IPASS_LINGXING_ACCESS_TOKEN，无法执行 sync_stock")
+			}
+			if len(cfg.Biz.Stock.LingXingWIDToDSCOWarehouseCode) == 0 {
+				return errors.New("未配置 IPASS_STOCK_WID_TO_DSCO_WAREHOUSE_CODE_JSON，无法执行 sync_stock")
+			}
+			if sp == nil {
+				return errors.New("sync_stock 初始化失败，请检查库存映射与外部系统配置")
+			}
+			return sp.SyncStock(ctx, cfg.System.Jobs.SyncStockBatchSize)
+		},
+	})
+
 	if cfg.System.Jobs.PullDSCOOrdersEnable && p != nil {
 		s.Add("pull_dsco_orders", time.Duration(cfg.System.Jobs.PullDSCOOrdersIntervalSec)*time.Second, func(ctx context.Context) error {
 			return p.PullOrders(ctx)

@@ -231,20 +231,19 @@ func LoadFromEnv() (Config, error) {
 	if cfg.System.Jobs.ShipToDSCOEnable && cfg.System.LingXing.SID <= 0 {
 		return Config{}, errors.New("开启发货回传任务时，必须配置 IPASS_LINGXING_SID（正整数）")
 	}
-	if cfg.System.Jobs.SyncStockEnable {
-		var err error
-		cfg.Biz.Stock.LingXingWIDToDSCOWarehouseCode, err = envJSONMapStringString("IPASS_STOCK_WID_TO_DSCO_WAREHOUSE_CODE_JSON")
-		if err != nil {
-			return Config{}, err
-		}
-		if len(cfg.Biz.Stock.LingXingWIDToDSCOWarehouseCode) == 0 {
-			return Config{}, errors.New("开启库存同步任务时，必须配置 IPASS_STOCK_WID_TO_DSCO_WAREHOUSE_CODE_JSON")
-		}
 
-		cfg.Biz.Stock.LingXingSKUToDSCOSKU, err = envJSONMapStringStringOptional("IPASS_STOCK_SKU_TO_DSCO_SKU_JSON")
-		if err != nil {
-			return Config{}, err
-		}
+	// 业务映射：允许为空（只在库存同步任务启用/执行时才要求必填）。
+	var err error
+	cfg.Biz.Stock.LingXingWIDToDSCOWarehouseCode, err = envJSONMapStringStringOptional("IPASS_STOCK_WID_TO_DSCO_WAREHOUSE_CODE_JSON")
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.Biz.Stock.LingXingSKUToDSCOSKU, err = envJSONMapStringStringOptional("IPASS_STOCK_SKU_TO_DSCO_SKU_JSON")
+	if err != nil {
+		return Config{}, err
+	}
+	if cfg.System.Jobs.SyncStockEnable && len(cfg.Biz.Stock.LingXingWIDToDSCOWarehouseCode) == 0 {
+		return Config{}, errors.New("开启库存同步任务时，必须配置 IPASS_STOCK_WID_TO_DSCO_WAREHOUSE_CODE_JSON")
 	}
 
 	return cfg, nil
