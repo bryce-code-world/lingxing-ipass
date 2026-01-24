@@ -27,4 +27,3 @@ func newMockGormDB(t *testing.T) (*gorm.DB, sqlmock.Sqlmock) {
 
 	return gdb, mock
 }
-

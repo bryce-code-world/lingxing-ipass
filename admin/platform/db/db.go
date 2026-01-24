@@ -21,4 +21,3 @@ func OpenMySQL(dsn string) (*gorm.DB, error) {
 	}
 	return gdb, nil
 }
-

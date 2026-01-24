@@ -42,4 +42,3 @@ func TestOpsRunners_ManualTriggerHasStandardJobsWhenSchedulerDisabled(t *testing
 
 	_ = cfg // 避免误以为测试与 cfg 无关；cfg 的 enable=false 即本用例前提。
 }
-

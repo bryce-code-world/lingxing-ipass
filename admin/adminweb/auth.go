@@ -139,4 +139,3 @@ func (s *Server) clearSessionCookie(c *gin.Context) {
 }
 
 func urlQueryEscape(s string) string { return url.QueryEscape(s) }
-

@@ -104,4 +104,3 @@ func TestStockPipeline_SyncStock_Behavior(t *testing.T) {
 		t.Fatalf("upsertCalls=%d want=1", upsertCalls)
 	}
 }
-

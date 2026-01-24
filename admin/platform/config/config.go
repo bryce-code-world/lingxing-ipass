@@ -72,4 +72,3 @@ func envBool(key string, def bool) bool {
 		return def
 	}
 }
-

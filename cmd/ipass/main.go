@@ -111,8 +111,6 @@ func main() {
 		}
 	}
 
-
-
 	var sp *sync.StockPipeline
 	if dscoCli != nil && lxCli != nil && len(cfg.Biz.Stock.LingXingWIDToDSCOWarehouseCode) > 0 {
 		sp, err = sync.NewStockPipeline(dscoCli, lxCli, manual, cfg.Biz.Stock.LingXingWIDToDSCOWarehouseCode, cfg.Biz.Stock.LingXingSKUToDSCOSKU)

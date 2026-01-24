@@ -76,4 +76,3 @@ func (s *WatermarkStore) ListAll(ctx context.Context) ([]JobWatermarkRow, error)
 	}
 	return rows, nil
 }
-

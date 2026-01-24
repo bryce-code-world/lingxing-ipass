@@ -45,4 +45,3 @@ VALUES (?, ?, ?, ?)
 ON DUPLICATE KEY UPDATE payload = VALUES(payload), payload_sha256 = VALUES(payload_sha256), fetched_at = VALUES(fetched_at)
 `, dscoOrderID, payload, hash, fetchedAt.UTC()).Error
 }
-

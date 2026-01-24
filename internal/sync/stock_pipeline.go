@@ -99,7 +99,9 @@ func (p *StockPipeline) SyncStock(ctx context.Context, batchSize int) error {
 
 				qty := it.ProductValidNum
 				inv := &dsco.ItemInventory{
-					SKU: dscoSKU,
+					Item: dsco.Item{
+						SKU: dscoSKU,
+					},
 					Warehouses: []dsco.ItemWarehouse{
 						{Code: dscoWH, Quantity: &qty},
 					},

@@ -47,4 +47,3 @@ func LoadDotEnv(path string) error {
 	}
 	return sc.Err()
 }
-

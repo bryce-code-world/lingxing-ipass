@@ -30,4 +30,3 @@ func Wrap(next http.Handler, password string) http.Handler {
 		next.ServeHTTP(w, r)
 	})
 }
-

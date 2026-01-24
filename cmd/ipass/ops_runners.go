@@ -63,4 +63,3 @@ func registerStandardOpsRunners(runners map[string]adminhttp.JobRunner, deps ops
 		runners["sync_stock"] = notReady("sync_stock")
 	}
 }
-

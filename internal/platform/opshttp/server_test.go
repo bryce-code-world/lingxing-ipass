@@ -42,4 +42,3 @@ func TestWrap_Behavior(t *testing.T) {
 		t.Fatalf("code=%d body=%s", rr.Code, rr.Body.String())
 	}
 }
-

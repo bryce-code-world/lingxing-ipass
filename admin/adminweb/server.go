@@ -22,7 +22,7 @@ type Options struct {
 	Manual    *store.ManualTaskStore
 	Order     *store.OrderStateStore
 
-	Now     func() time.Time
+	Now func() time.Time
 }
 
 type Server struct {
