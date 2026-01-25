@@ -269,7 +269,7 @@ func (p *OrderPipeline) PushOrdersToLingXing(ctx context.Context, platformCode i
 		}
 
 		createReq := lingxing.CreateOrdersV2Request{
-			PlatformCode: platformCode,
+			PlatformCode: lingxing.PlatformCode(platformCode),
 			StoreID:      storeID,
 			Orders:       []lingxing.CreateOrderV2{lxOrder},
 		}
@@ -373,7 +373,7 @@ func (p *OrderPipeline) queryLingXingGlobalOrderNo(ctx context.Context, platform
 			Offset:           0,
 			Length:           20,
 			StoreID:          []string{storeID},
-			PlatformCode:     []int{platformCode},
+			PlatformCode:     []lingxing.PlatformCode{lingxing.PlatformCode(platformCode)},
 			PlatformOrderNos: []string{dscoOrderID},
 		})
 		return err
@@ -469,7 +469,7 @@ func (p *OrderPipeline) AckToDSCO(ctx context.Context, platformCode int, storeID
 				StartTime:    startTime,
 				EndTime:      until,
 				StoreID:      []string{storeID},
-				PlatformCode: []int{platformCode},
+				PlatformCode: []lingxing.PlatformCode{lingxing.PlatformCode(platformCode)},
 				OrderStatus:  5,
 			})
 			return err
@@ -608,7 +608,7 @@ func (p *OrderPipeline) ShipToDSCO(ctx context.Context, platformCode int, storeI
 				StartTime:    startTime,
 				EndTime:      until,
 				StoreID:      []string{storeID},
-				PlatformCode: []int{platformCode},
+				PlatformCode: []lingxing.PlatformCode{lingxing.PlatformCode(platformCode)},
 				OrderStatus:  6,
 			})
 			return err
@@ -671,7 +671,7 @@ func (p *OrderPipeline) ShipToDSCO(ctx context.Context, platformCode int, storeI
 			}
 
 			shipDate := pickShipDateRFC3339(wms, p.shipDateSource)
-			resp, err := p.dscoCli.Order.SingleShipment(ctx, dsco.ShipmentsForUpdate{
+			resp, err := p.dscoCli.Shipment.CreateSingle(ctx, dsco.ShipmentsForUpdate{
 				DscoOrderID: dscoOrderID,
 				Shipments: []dsco.ShipmentForUpdate{
 					{
@@ -931,7 +931,7 @@ func buildInvoiceFromDSCOOrder(invoiceID string, o *dsco.Order, now time.Time) (
 	if strings.TrimSpace(o.DscoOrderID) == "" {
 		return nil, errors.New("缺少 dscoOrderId")
 	}
-	currency := strings.TrimSpace(o.CurrencyCode)
+	currency := strings.TrimSpace(ptrString(o.CurrencyCode))
 	if currency == "" {
 		return nil, errors.New("缺少 currencyCode")
 	}
@@ -945,9 +945,9 @@ func buildInvoiceFromDSCOOrder(invoiceID string, o *dsco.Order, now time.Time) (
 		if li.Quantity <= 0 {
 			return nil, fmt.Errorf("lineItems[%d] quantity 非法", i)
 		}
-		sku := strings.TrimSpace(li.SKU)
+		sku := strings.TrimSpace(ptrString(li.SKU))
 		if sku == "" {
-			sku = strings.TrimSpace(li.PartnerSKU)
+			sku = strings.TrimSpace(ptrString(li.PartnerSKU))
 		}
 		if sku == "" {
 			return nil, fmt.Errorf("lineItems[%d] 缺少 sku/partnerSku", i)
@@ -979,4 +979,11 @@ func buildInvoiceFromDSCOOrder(invoiceID string, o *dsco.Order, now time.Time) (
 		TotalAmount:  total,
 		LineItems:    items,
 	}, nil
+}
+
+func ptrString(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
 }

@@ -1,7 +1,6 @@
 package order
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -9,19 +8,6 @@ import (
 	"example.com/lingxing/golib/v2/sdk/dsco"
 	"example.com/lingxing/golib/v2/sdk/lingxing"
 )
-
-type dscoShipping struct {
-	City    string `json:"city"`
-	Country string `json:"country"`
-
-	Name      string `json:"name"`
-	FirstName string `json:"firstName"`
-	LastName  string `json:"lastName"`
-
-	Address1 string   `json:"address1"`
-	Address2 string   `json:"address2"`
-	Address  []string `json:"address"`
-}
 
 // MapCreateOrderV2FromDSCO 将 DSCO Order 映射为领星 CreateOrderV2（一期最小必填集）。
 //
@@ -36,14 +22,12 @@ func MapCreateOrderV2FromDSCO(o *dsco.Order) (lingxing.CreateOrderV2, error) {
 		return lingxing.CreateOrderV2{}, errors.New("缺少 dscoOrderId")
 	}
 
-	var ship dscoShipping
-	if len(o.Shipping) > 0 {
-		if err := json.Unmarshal(o.Shipping, &ship); err != nil {
-			return lingxing.CreateOrderV2{}, fmt.Errorf("解析 shipping 失败: %w", err)
-		}
+	if o.Shipping == nil {
+		return lingxing.CreateOrderV2{}, errors.New("缺少 shipping")
 	}
+	ship := o.Shipping
 
-	country := strings.TrimSpace(ship.Country)
+	country := strings.TrimSpace(ptrString(ship.Country))
 	if country == "" {
 		return lingxing.CreateOrderV2{}, errors.New("缺少 shipping.country")
 	}
@@ -52,10 +36,10 @@ func MapCreateOrderV2FromDSCO(o *dsco.Order) (lingxing.CreateOrderV2, error) {
 		return lingxing.CreateOrderV2{}, errors.New("缺少 shipping.city")
 	}
 
-	name := strings.TrimSpace(ship.Name)
+	name := strings.TrimSpace(ptrString(ship.Name))
 	if name == "" {
-		first := strings.TrimSpace(ship.FirstName)
-		last := strings.TrimSpace(ship.LastName)
+		first := strings.TrimSpace(ptrString(ship.FirstName))
+		last := strings.TrimSpace(ptrString(ship.LastName))
 		name = strings.TrimSpace(strings.Join([]string{first, last}, " "))
 	}
 	if name == "" {
@@ -67,12 +51,12 @@ func MapCreateOrderV2FromDSCO(o *dsco.Order) (lingxing.CreateOrderV2, error) {
 		addressLine1 = strings.TrimSpace(ship.Address[0])
 	}
 	if addressLine1 == "" {
-		addressLine1 = strings.TrimSpace(ship.Address1)
+		addressLine1 = strings.TrimSpace(ptrString(ship.Address1))
 	}
 	if addressLine1 == "" {
 		return lingxing.CreateOrderV2{}, errors.New("缺少 shipping.address/address1")
 	}
-	_ = strings.TrimSpace(ship.Address2) // 一期暂不单独落字段，避免“过度翻译”
+	_ = strings.TrimSpace(ptrString(ship.Address2)) // 一期暂不单独落字段，避免“过度翻译”
 
 	if len(o.LineItems) == 0 {
 		return lingxing.CreateOrderV2{}, errors.New("缺少 lineItems")
@@ -83,9 +67,9 @@ func MapCreateOrderV2FromDSCO(o *dsco.Order) (lingxing.CreateOrderV2, error) {
 		if li.Quantity <= 0 {
 			return lingxing.CreateOrderV2{}, fmt.Errorf("lineItems[%d] quantity 非法", i)
 		}
-		sku := strings.TrimSpace(li.SKU)
+		sku := strings.TrimSpace(ptrString(li.SKU))
 		if sku == "" {
-			sku = strings.TrimSpace(li.PartnerSKU)
+			sku = strings.TrimSpace(ptrString(li.PartnerSKU))
 		}
 		if sku == "" {
 			return lingxing.CreateOrderV2{}, fmt.Errorf("lineItems[%d] 缺少 sku/partnerSku", i)
@@ -114,7 +98,14 @@ func MapCreateOrderV2FromDSCO(o *dsco.Order) (lingxing.CreateOrderV2, error) {
 		ReceiverName:        name,
 		City:                city,
 		AddressLine1:        addressLine1,
-		AmountCurrency:      strings.TrimSpace(o.CurrencyCode),
+		AmountCurrency:      strings.TrimSpace(ptrString(o.CurrencyCode)),
 		Items:               items,
 	}, nil
+}
+
+func ptrString(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
 }
