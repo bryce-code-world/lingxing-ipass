@@ -1,6 +1,8 @@
 module lingxingipass
 
-go 1.22.8
+go 1.23
+
+toolchain go1.23.0
 
 require (
 	example.com/lingxing/golib/v2 v2.0.0
@@ -10,7 +12,7 @@ require (
 	gorm.io/gorm v1.25.12
 )
 
-replace example.com/lingxing/golib/v2 => ./golib/v2
+replace example.com/lingxing/golib/v2 => ./golibv2/v2
 
 require (
 	filippo.io/edwards25519 v1.1.0 // indirect
