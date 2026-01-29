@@ -1,0 +1,86 @@
+package runtimecfg
+
+import (
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/robfig/cron/v3"
+)
+
+func DefaultConfig(domain string) Config {
+	return Config{
+		Domain: domain,
+		Jobs: map[JobName]JobConfig{
+			JobPullDSCOOrders: {Enable: false, Cron: "0 */15 * * * *", Size: 200},
+			JobPushToLingXing: {Enable: false, Cron: "0 */15 * * * *", Size: 50},
+			JobAckToDSCO:      {Enable: false, Cron: "0 */15 * * * *", Size: 200},
+			JobShipToDSCO:     {Enable: false, Cron: "0 */15 * * * *", Size: 200},
+			JobInvoiceToDSCO:  {Enable: false, Cron: "0 */15 * * * *", Size: 50},
+			JobSyncStock:      {Enable: false, Cron: "0 0 0 * * *", Size: 200},
+			JobCleanupExports: {Enable: true, Cron: "0 0 */1 * * *", Size: 1},
+		},
+		Mapping: Mapping{
+			Shop:      map[string]string{},
+			Warehouse: map[string]string{},
+			SKU:       map[string]string{},
+			Shipment:  map[string]string{},
+		},
+	}
+}
+
+func Validate(cfg Config, supportedJobs map[JobName]struct{}) error {
+	if cfg.Domain != DomainDSCOLingXing {
+		return fmt.Errorf("domain 不支持：%s", cfg.Domain)
+	}
+	if len(cfg.Jobs) == 0 {
+		return errors.New("jobs 不能为空")
+	}
+	parser := cron.NewParser(cron.Second | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor)
+	for name, jc := range cfg.Jobs {
+		if _, ok := supportedJobs[name]; !ok {
+			return fmt.Errorf("jobs 包含未知任务：%s", name)
+		}
+		if jc.Cron == "" {
+			return fmt.Errorf("jobs.%s.cron 不能为空", name)
+		}
+		_, err := parser.Parse(jc.Cron)
+		if err != nil {
+			return fmt.Errorf("jobs.%s.cron 非法：%w", name, err)
+		}
+		if jc.Size <= 0 {
+			return fmt.Errorf("jobs.%s.size 必须为正整数", name)
+		}
+	}
+	// Basic mapping direction sanity: DSCO->LingXing (strings only).
+	// Ensure no empty key/value.
+	checkMap := func(name string, m map[string]string) error {
+		for k, v := range m {
+			if k == "" || v == "" {
+				return fmt.Errorf("mapping.%s 不允许空 key/value", name)
+			}
+		}
+		return nil
+	}
+	if err := checkMap("shop", cfg.Mapping.Shop); err != nil {
+		return err
+	}
+	if err := checkMap("warehouse", cfg.Mapping.Warehouse); err != nil {
+		return err
+	}
+	if err := checkMap("sku", cfg.Mapping.SKU); err != nil {
+		return err
+	}
+	if err := checkMap("shipment", cfg.Mapping.Shipment); err != nil {
+		return err
+	}
+	// If stock job enabled, warehouse mapping must be non-empty.
+	if jc, ok := cfg.Jobs[JobSyncStock]; ok && jc.Enable {
+		if len(cfg.Mapping.Warehouse) == 0 {
+			return errors.New("启用 sync_stock 前：mapping.warehouse 必须非空")
+		}
+	}
+
+	_ = time.UTC // doc: cron is UTC; enforcement in scheduler.
+	return nil
+}
