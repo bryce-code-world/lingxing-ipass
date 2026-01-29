@@ -36,25 +36,18 @@ type LingXingAuthConfig struct {
 type IntegrationConfig struct {
 	DSCO     DSCOIntegrationConfig     `yaml:"dsco"`
 	LingXing LingXingIntegrationConfig `yaml:"lingxing"`
-	Shipment ShipmentIntegrationConfig `yaml:"shipment"`
 }
 
 type DSCOIntegrationConfig struct {
-	BaseURL string                 `yaml:"base_url"`
-	Codes   map[string]any         `yaml:"codes"`
-	Raw     map[string]interface{} `yaml:",inline"`
+	// BaseURL DSCO API 基础地址；为空则使用 SDK 默认 BaseURLProd。
+	BaseURL string `yaml:"base_url"`
 }
 
 type LingXingIntegrationConfig struct {
-	BaseURL      string `yaml:"base_url"`
-	AccessToken  string `yaml:"access_token"`
-	PlatformCode int    `yaml:"platform_code"`
-	StoreID      string `yaml:"store_id"`
-	SID          int    `yaml:"sid"`
-}
-
-type ShipmentIntegrationConfig struct {
-	ShipDateSource string `yaml:"ship_date_source"` // delivered_at/stock_delivered_at/none
+	// BaseURL 领星 API 基础地址；为空则使用 SDK 默认 BaseURLProd。
+	BaseURL string `yaml:"base_url"`
+	// PlatformCode 领星平台编码（固定值；与业务相关，仍保留在 env.yaml）。
+	PlatformCode int `yaml:"platform_code"`
 }
 
 type AdminConfig struct {

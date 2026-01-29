@@ -25,9 +25,6 @@ func applyDefaults(cfg *EnvConfig) {
 	if cfg.Admin.DisplayTimezone == "" {
 		cfg.Admin.DisplayTimezone = "UTC"
 	}
-	if cfg.Integration.Shipment.ShipDateSource == "" {
-		cfg.Integration.Shipment.ShipDateSource = "delivered_at"
-	}
 }
 
 func applyEnvOverride(cfg *EnvConfig) {
@@ -66,9 +63,6 @@ func applyEnvOverride(cfg *EnvConfig) {
 	if v := os.Getenv("IPASS_INTEGRATION_LINGXING_BASE_URL"); v != "" {
 		cfg.Integration.LingXing.BaseURL = v
 	}
-	if v := os.Getenv("IPASS_INTEGRATION_LINGXING_ACCESS_TOKEN"); v != "" {
-		cfg.Integration.LingXing.AccessToken = v
-	}
 }
 
 func ValidateEnv(cfg EnvConfig) error {
@@ -100,26 +94,14 @@ func ValidateEnv(cfg EnvConfig) error {
 		return errors.New("auth.lingxing.app_id/app_secret 不能为空")
 	}
 	if cfg.Integration.DSCO.BaseURL == "" {
-		return errors.New("integration.dsco.base_url 不能为空")
+		// optional: SDK has defaults
 	}
 	if cfg.Integration.LingXing.BaseURL == "" {
-		return errors.New("integration.lingxing.base_url 不能为空")
+		// optional: SDK has defaults
 	}
 	if cfg.Integration.LingXing.PlatformCode == 0 {
 		return errors.New("integration.lingxing.platform_code 不能为空/必须为正整数")
 	}
-	if cfg.Integration.LingXing.StoreID == "" {
-		return errors.New("integration.lingxing.store_id 不能为空")
-	}
-	if cfg.Integration.LingXing.SID <= 0 {
-		return errors.New("integration.lingxing.sid 必须为正整数")
-	}
-	switch cfg.Integration.Shipment.ShipDateSource {
-	case "", "delivered_at", "stock_delivered_at", "none":
-	default:
-		return errors.New("integration.shipment.ship_date_source 必须为 delivered_at/stock_delivered_at/none")
-	}
-	// ship_date_source default is applied in LoadEnvYAML.
 
 	return nil
 }

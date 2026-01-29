@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"math"
+	"strconv"
+	"strings"
 	"time"
 
 	"example.com/lingxing/golib/v2/sdk/dsco"
@@ -36,7 +38,7 @@ func (d *Domain) InvoiceToDSCO(ctx integration.TaskContext) error {
 		return err
 	}
 
-	_, skuRev, _, err := buildReverseMaps(ctx.Config)
+	skuRev, err := buildReverseSKUMap(ctx.Config)
 	if err != nil {
 		return err
 	}
@@ -52,10 +54,26 @@ func (d *Domain) InvoiceToDSCO(ctx integration.TaskContext) error {
 			continue
 		}
 
+		shipCode := getDSCOShippingServiceLevelCode(dscoOrder)
+		sidStr := ""
+		if shipCode != "" {
+			sidStr = ctx.Config.Mapping.Shipment[shipCode]
+		}
+		sidStr = strings.TrimSpace(sidStr)
+		if sidStr == "" {
+			logger.Warn(taskCtx, "missing mapping.shipment for dsco shippingServiceLevelCode", "po_number", po, "shipping_service_level_code", shipCode)
+			continue
+		}
+		sid, err := strconv.Atoi(sidStr)
+		if err != nil || sid <= 0 {
+			logger.Warn(taskCtx, "invalid mapping.shipment sid", "po_number", po, "shipping_service_level_code", shipCode, "sid", sidStr)
+			continue
+		}
+
 		wmsOrders, _, err := lx.Warehouse.WmsOrderList(taskCtx, lingxing.WmsOrderListRequest{
 			Page:               1,
 			PageSize:           20,
-			SIDArr:             []int{d.env.Integration.LingXing.SID},
+			SIDArr:             []int{sid},
 			PlatformOrderNoArr: []string{po},
 		})
 		if err != nil || len(wmsOrders) == 0 {
@@ -63,15 +81,9 @@ func (d *Domain) InvoiceToDSCO(ctx integration.TaskContext) error {
 		}
 
 		shipDate := time.Now().UTC().Format(time.RFC3339)
-		if d.env.Integration.Shipment.ShipDateSource != "none" {
-			rawTime := wmsOrders[0].DeliveredAt
-			if d.env.Integration.Shipment.ShipDateSource == "stock_delivered_at" {
-				rawTime = wmsOrders[0].StockDeliveredAt
-			}
-			if rawTime != "" {
-				if t, err := parseLingXingDateTimeToRFC3339UTC(rawTime); err == nil {
-					shipDate = t
-				}
+		if rawTime := wmsOrders[0].DeliveredAt; rawTime != "" {
+			if t, err := parseLingXingDateTimeToRFC3339UTC(rawTime); err == nil {
+				shipDate = t
 			}
 		}
 

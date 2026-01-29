@@ -3,7 +3,8 @@ package dsco_lingxing
 import (
 	"context"
 	"encoding/json"
-	"time"
+	"strconv"
+	"strings"
 
 	"example.com/lingxing/golib/v2/sdk/dsco"
 	"example.com/lingxing/golib/v2/sdk/lingxing"
@@ -35,7 +36,7 @@ func (d *Domain) ShipToDSCO(ctx integration.TaskContext) error {
 		return err
 	}
 
-	_, skuRev, shipRev, err := buildReverseMaps(ctx.Config)
+	skuRev, err := buildReverseSKUMap(ctx.Config)
 	if err != nil {
 		return err
 	}
@@ -45,6 +46,27 @@ func (d *Domain) ShipToDSCO(ctx integration.TaskContext) error {
 
 	for _, row := range items {
 		po := row.PONumber
+		var dscoOrder dsco.Order
+		if err := json.Unmarshal(row.Payload, &dscoOrder); err != nil {
+			continue
+		}
+
+		shipCode := getDSCOShippingServiceLevelCode(dscoOrder)
+		sidStr := ""
+		if shipCode != "" {
+			sidStr = ctx.Config.Mapping.Shipment[shipCode]
+		}
+		sidStr = strings.TrimSpace(sidStr)
+		if sidStr == "" {
+			logger.Warn(taskCtx, "missing mapping.shipment for dsco shippingServiceLevelCode", "po_number", po, "shipping_service_level_code", shipCode)
+			continue
+		}
+		sid, err := strconv.Atoi(sidStr)
+		if err != nil || sid <= 0 {
+			logger.Warn(taskCtx, "invalid mapping.shipment sid", "po_number", po, "shipping_service_level_code", shipCode, "sid", sidStr)
+			continue
+		}
+
 		detail, err := lx.Order.GetOrderDetailV2(taskCtx, lingxing.OrderDetailV2Request{PlatformOrderNo: po})
 		if err != nil {
 			continue
@@ -53,40 +75,28 @@ func (d *Domain) ShipToDSCO(ctx integration.TaskContext) error {
 		if tracking == "" {
 			continue
 		}
-		dscoShipMethod := shipRev[detail.LogisticsInfo.LogisticsTypeName]
+
+		dscoShipMethod := getDSCOShipMethod(dscoOrder)
+		if dscoShipMethod == "" {
+			dscoShipMethod = shipCode
+		}
 
 		shipDateRFC3339 := ""
-		switch d.env.Integration.Shipment.ShipDateSource {
-		case "none":
-		case "delivered_at", "stock_delivered_at":
-			orders, _, err := lx.Warehouse.WmsOrderList(taskCtx, lingxing.WmsOrderListRequest{
-				Page:               1,
-				PageSize:           20,
-				SIDArr:             []int{d.env.Integration.LingXing.SID},
-				PlatformOrderNoArr: []string{po},
-			})
-			if err == nil && len(orders) > 0 {
-				rawTime := orders[0].DeliveredAt
-				if d.env.Integration.Shipment.ShipDateSource == "stock_delivered_at" {
-					rawTime = orders[0].StockDeliveredAt
-				}
-				if rawTime != "" {
-					if t, err := parseLingXingDateTimeToRFC3339UTC(rawTime); err == nil {
-						shipDateRFC3339 = t
-					}
-				}
-			}
-			if shipDateRFC3339 == "" && d.env.Integration.Shipment.ShipDateSource == "delivered_at" {
-				// Fallback to order detail timestamp seconds.
-				if sec, err := parseInt64(detail.GlobalDeliveryTime); err == nil && sec > 0 {
-					shipDateRFC3339 = time.Unix(sec, 0).UTC().Format(time.RFC3339)
+		orders, _, err := lx.Warehouse.WmsOrderList(taskCtx, lingxing.WmsOrderListRequest{
+			Page:               1,
+			PageSize:           20,
+			SIDArr:             []int{sid},
+			PlatformOrderNoArr: []string{po},
+		})
+		if err == nil && len(orders) > 0 {
+			rawTime := orders[0].DeliveredAt
+			if rawTime != "" {
+				if t, err := parseLingXingDateTimeToRFC3339UTC(rawTime); err == nil {
+					shipDateRFC3339 = t
 				}
 			}
 		}
 
-		// Build dscoItemId map from payload if possible.
-		var dscoOrder dsco.Order
-		_ = json.Unmarshal(row.Payload, &dscoOrder)
 		dscoItemIDByPartner := map[string]string{}
 		for _, li := range dscoOrder.LineItems {
 			p := ""
@@ -104,7 +114,7 @@ func (d *Domain) ShipToDSCO(ctx integration.TaskContext) error {
 		wmsOrders, _, err := lx.Warehouse.WmsOrderList(taskCtx, lingxing.WmsOrderListRequest{
 			Page:               1,
 			PageSize:           20,
-			SIDArr:             []int{d.env.Integration.LingXing.SID},
+			SIDArr:             []int{sid},
 			PlatformOrderNoArr: []string{po},
 		})
 		if err == nil && len(wmsOrders) > 0 && len(wmsOrders[0].ProductInfo) > 0 {

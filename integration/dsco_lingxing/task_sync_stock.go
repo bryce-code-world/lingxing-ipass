@@ -26,7 +26,7 @@ func (d *Domain) SyncStock(ctx integration.TaskContext) error {
 		return err
 	}
 
-	_, skuRev, _, err := buildReverseMaps(ctx.Config)
+	skuRev, err := buildReverseSKUMap(ctx.Config)
 	if err != nil {
 		return err
 	}

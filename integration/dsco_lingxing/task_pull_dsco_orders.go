@@ -84,12 +84,7 @@ func (d *Domain) PullDSCOOrders(ctx integration.TaskContext) error {
 				logger.Warn(taskCtx, "decode dsco order failed", "err", err)
 				continue
 			}
-			createStr := ""
-			if order.DscoCreateDate != nil {
-				createStr = *order.DscoCreateDate
-			} else if order.RetailerCreateDate != nil {
-				createStr = *order.RetailerCreateDate
-			}
+			createStr := derefString(order.DscoCreateDate)
 			createUnix, err := parseRFC3339ToUnixSec(createStr)
 			if err != nil {
 				logger.Warn(taskCtx, "parse dsco create time failed", "err", err)

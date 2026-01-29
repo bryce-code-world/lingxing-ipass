@@ -103,18 +103,24 @@ func getDSCOWarehouseCode(o dsco.Order) string {
 	return ""
 }
 
-func buildReverseMaps(cfg runtimecfg.Config) (widToDSCOWarehouse map[string]string, lingSKUToDSCOPartner map[string]string, logisticsNameToDSCOShipMethod map[string]string, err error) {
-	widToDSCOWarehouse, err = reverseMapStrict(cfg.Mapping.Warehouse)
-	if err != nil {
-		return nil, nil, nil, err
+func getDSCOShippingServiceLevelCode(o dsco.Order) string {
+	if o.ShippingServiceLevelCode != nil && strings.TrimSpace(*o.ShippingServiceLevelCode) != "" {
+		return strings.TrimSpace(*o.ShippingServiceLevelCode)
 	}
-	lingSKUToDSCOPartner, err = reverseMapStrict(cfg.Mapping.SKU)
-	if err != nil {
-		return nil, nil, nil, err
+	if o.RequestedShippingServiceLevelCode != nil && strings.TrimSpace(*o.RequestedShippingServiceLevelCode) != "" {
+		return strings.TrimSpace(*o.RequestedShippingServiceLevelCode)
 	}
-	logisticsNameToDSCOShipMethod, err = reverseMapStrict(cfg.Mapping.Shipment)
-	if err != nil {
-		return nil, nil, nil, err
+	if o.RequestedShippingServiceLevelCodeUnmapped != nil && strings.TrimSpace(*o.RequestedShippingServiceLevelCodeUnmapped) != "" {
+		return strings.TrimSpace(*o.RequestedShippingServiceLevelCodeUnmapped)
 	}
-	return widToDSCOWarehouse, lingSKUToDSCOPartner, logisticsNameToDSCOShipMethod, nil
+	return ""
+}
+
+func buildReverseSKUMap(cfg runtimecfg.Config) (map[string]string, error) {
+	// mapping.sku is DSCO -> 领星；回传侧需要 领星 -> DSCO，所以这里做严格反向。
+	lingSKUToDSCOPartner, err := reverseMapStrict(cfg.Mapping.SKU)
+	if err != nil {
+		return nil, err
+	}
+	return lingSKUToDSCOPartner, nil
 }

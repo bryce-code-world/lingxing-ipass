@@ -80,6 +80,23 @@ func Validate(cfg Config, supportedJobs map[JobName]struct{}) error {
 			return errors.New("启用 sync_stock 前：mapping.warehouse 必须非空")
 		}
 	}
+	// If push job enabled, shop mapping must be non-empty to determine store_id.
+	if jc, ok := cfg.Jobs[JobPushToLingXing]; ok && jc.Enable {
+		if len(cfg.Mapping.Shop) == 0 {
+			return errors.New("启用 push_to_lingxing 前：mapping.shop 必须非空")
+		}
+	}
+	// If ship/invoice jobs enabled, shipment mapping must be non-empty to map SID.
+	if jc, ok := cfg.Jobs[JobShipToDSCO]; ok && jc.Enable {
+		if len(cfg.Mapping.Shipment) == 0 {
+			return errors.New("启用 ship_to_dsco 前：mapping.shipment 必须非空")
+		}
+	}
+	if jc, ok := cfg.Jobs[JobInvoiceToDSCO]; ok && jc.Enable {
+		if len(cfg.Mapping.Shipment) == 0 {
+			return errors.New("启用 invoice_to_dsco 前：mapping.shipment 必须非空")
+		}
+	}
 
 	_ = time.UTC // doc: cron is UTC; enforcement in scheduler.
 	return nil

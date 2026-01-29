@@ -22,7 +22,7 @@ func (d *Domain) lingxingClient(ctx context.Context) (*lingxing.Client, error) {
 		BaseURL:     d.env.Integration.LingXing.BaseURL,
 		AppID:       d.env.Auth.LingXing.AppID,
 		AppSecret:   d.env.Auth.LingXing.AppSecret,
-		AccessToken: d.env.Integration.LingXing.AccessToken,
+		AccessToken: "",
 		AutoToken:   true,
 		HTTPClient:  d.httpClient,
 		UserAgent:   "lingxing-ipass",
