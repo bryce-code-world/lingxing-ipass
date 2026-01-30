@@ -108,16 +108,14 @@ func (d *Domain) PullDSCOOrders(ctx integration.TaskContext) error {
 			}
 
 			row := store.DSCOOrderSyncRow{
-				PONumber:            order.PoNumber,
-				DSCOOrderID:         order.DscoOrderID,
-				ConsumerOrderNumber: derefString(order.ConsumerOrderNumber),
-				Channel:             derefString(order.Channel),
-				DSCOCreateTime:      createUnix,
-				Status:              status,
-				Payload:             json.RawMessage(raw),
-				MSKUs:               mskus,
-				WarehouseID:         getDSCOWarehouseCode(order),
-				Shipment:            getDSCOShipMethod(order),
+				PONumber:       order.PoNumber,
+				DSCOCreateTime: createUnix,
+				DSCOREtailerID: derefString(order.DscoRetailerID),
+				Status:         status,
+				Payload:        json.RawMessage(raw),
+				MSKUs:          mskus,
+				WarehouseID:    getDSCOWarehouseCode(order),
+				Shipment:       getDSCOShippingServiceLevelCode(order),
 			}
 			if err := d.orderStore.Upsert(taskCtx, row); err != nil {
 				logger.Warn(taskCtx, "upsert dsco_order_sync failed", "err", err)

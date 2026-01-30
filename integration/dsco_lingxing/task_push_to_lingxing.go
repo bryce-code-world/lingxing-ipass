@@ -41,15 +41,12 @@ func (d *Domain) PushToLingXing(ctx integration.TaskContext) error {
 			continue
 		}
 		shopKey := strings.TrimSpace(derefString(order.DscoRetailerID))
-		if shopKey == "" {
-			shopKey = strings.TrimSpace(derefString(order.Channel))
-		}
 		storeID := ""
 		if shopKey != "" {
 			storeID = strings.TrimSpace(ctx.Config.Mapping.Shop[shopKey])
 		}
 		if storeID == "" {
-			logger.Warn(taskCtx, "missing mapping.shop for dsco retailer id/channel", "po_number", order.PoNumber, "shop_key", shopKey)
+			logger.Warn(taskCtx, "missing mapping.shop for dsco retailer id", "po_number", order.PoNumber, "shop_key", shopKey)
 			continue
 		}
 

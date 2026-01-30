@@ -12,21 +12,19 @@ type RuntimeConfigRow struct {
 func (RuntimeConfigRow) TableName() string { return "runtime_config" }
 
 type DSCOOrderSyncRow struct {
-	ID                  int64           `gorm:"column:id;primaryKey"`
-	PONumber            string          `gorm:"column:po_number"`
-	DSCOOrderID         string          `gorm:"column:dsco_order_id"`
-	ConsumerOrderNumber string          `gorm:"column:consumer_order_number"`
-	Channel             string          `gorm:"column:channel"`
-	DSCOCreateTime      int64           `gorm:"column:dsco_create_time"`
-	Status              int16           `gorm:"column:status"`
-	Payload             json.RawMessage `gorm:"column:payload"`
-	MSKUs               []string        `gorm:"column:mskus;type:text[]"`
-	WarehouseID         string          `gorm:"column:warehouse_id"`
-	Shipment            string          `gorm:"column:shipment"`
-	ShippedTrackingNo   string          `gorm:"column:shipped_tracking_no"`
-	DSCOInvoiceID       string          `gorm:"column:dsco_invoice_id"`
-	CreatedAt           int64           `gorm:"column:created_at"`
-	UpdatedAt           int64           `gorm:"column:updated_at"`
+	ID                int64           `gorm:"column:id;primaryKey"`
+	PONumber          string          `gorm:"column:po_number"`
+	DSCOCreateTime    int64           `gorm:"column:dsco_create_time"`
+	DSCOREtailerID    string          `gorm:"column:dsco_retailer_id"`
+	Status            int16           `gorm:"column:status"`
+	Payload           json.RawMessage `gorm:"column:payload"`
+	MSKUs             []string        `gorm:"column:mskus;type:text[]"`
+	WarehouseID       string          `gorm:"column:warehouse_id"`
+	Shipment          string          `gorm:"column:shipment"`
+	ShippedTrackingNo string          `gorm:"column:shipped_tracking_no"`
+	DSCOInvoiceID     string          `gorm:"column:dsco_invoice_id"`
+	CreatedAt         int64           `gorm:"column:created_at"`
+	UpdatedAt         int64           `gorm:"column:updated_at"`
 }
 
 func (DSCOOrderSyncRow) TableName() string { return "dsco_order_sync" }

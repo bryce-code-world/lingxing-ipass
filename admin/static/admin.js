@@ -236,9 +236,7 @@ function ordersFilter() {
   const f = {};
   const set = (k, v) => { if (v !== "" && v !== null && v !== undefined) f[k] = v; };
   set("po_number", (qs("qPo")?.value || "").trim());
-  set("dsco_order_id", (qs("qDscoOrderId")?.value || "").trim());
-  set("consumer_order_number", (qs("qConsumer")?.value || "").trim());
-  set("channel", (qs("qChannel")?.value || "").trim());
+  set("dsco_retailer_id", (qs("qRetailer")?.value || "").trim());
   set("msku", (qs("qMSKU")?.value || "").trim());
   set("status", (qs("qStatus")?.value || "").trim());
   const s = parseDateTimeLocal(qs("qStartDT")?.value || "");
@@ -261,7 +259,7 @@ async function adminLoadOrders(offset) {
     tbody.innerHTML = "";
     for (const it of (data.items || [])) {
       const tr = document.createElement("tr");
-      tr.innerHTML = `<td>${it.id}</td><td><code>${it.po_number}</code></td><td title="${it.dsco_create_time}">${fmtUnixSec(it.dsco_create_time)}</td><td>${it.status}</td><td>${it.warehouse_id}</td><td>${it.shipment}</td><td>${it.shipped_tracking_no}</td><td>${it.dsco_invoice_id}</td>`;
+      tr.innerHTML = `<td>${it.id}</td><td><code>${it.po_number}</code></td><td title="${it.dsco_create_time}">${fmtUnixSec(it.dsco_create_time)}</td><td>${it.status}</td><td>${it.warehouse_id}</td><td>${it.shipment}</td><td>${it.dsco_retailer_id || ""}</td><td>${it.shipped_tracking_no}</td><td>${it.dsco_invoice_id}</td>`;
       tbody.appendChild(tr);
     }
     showToast("Orders: OK");
@@ -281,9 +279,7 @@ async function adminExportOrders() {
     if (f.end) body.endTime = parseInt(f.end, 10);
     if (f.status) body.statusIn = f.status.split(",").map(s => parseInt(s.trim(), 10)).filter(n => !Number.isNaN(n));
     if (f.po_number) body.poNumberLike = f.po_number;
-    if (f.dsco_order_id) body.dscoOrderId = f.dsco_order_id;
-    if (f.consumer_order_number) body.consumerOrderNumberLike = f.consumer_order_number;
-    if (f.channel) body.channel = f.channel;
+    if (f.dsco_retailer_id) body.dscoRetailerId = f.dsco_retailer_id;
     if (f.msku) body.msku = f.msku;
     await apiDownload("/admin/api/export/dsco_order_sync", body, "dsco_order_sync.csv");
     showToast("Export: OK");

@@ -126,9 +126,6 @@ func shopKeyFromDSCOOrder(o dsco.Order) string {
 	if o.DscoRetailerID != nil && strings.TrimSpace(*o.DscoRetailerID) != "" {
 		return strings.TrimSpace(*o.DscoRetailerID)
 	}
-	if o.Channel != nil && strings.TrimSpace(*o.Channel) != "" {
-		return strings.TrimSpace(*o.Channel)
-	}
 	return ""
 }
 

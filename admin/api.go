@@ -145,13 +145,11 @@ func (s *Server) apiRunOneJob(c *gin.Context) {
 
 func (s *Server) apiListOrders(c *gin.Context) {
 	filter := store.DSCOOrderSyncListFilter{
-		Offset:                  parseInt(c.Query("offset"), 0),
-		Limit:                   parseInt(c.Query("limit"), 50),
-		PONumberLike:            c.Query("po_number"),
-		DSCOOrderID:             c.Query("dsco_order_id"),
-		ConsumerOrderNumberLike: c.Query("consumer_order_number"),
-		Channel:                 c.Query("channel"),
-		MSKU:                    c.Query("msku"),
+		Offset:         parseInt(c.Query("offset"), 0),
+		Limit:          parseInt(c.Query("limit"), 50),
+		PONumberLike:   c.Query("po_number"),
+		DSCOREtailerID: c.Query("dsco_retailer_id"),
+		MSKU:           c.Query("msku"),
 	}
 	if v := c.Query("start"); v != "" {
 		if n, err := strconv.ParseInt(v, 10, 64); err == nil {

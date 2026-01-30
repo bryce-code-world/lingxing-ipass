@@ -21,9 +21,6 @@ CREATE TABLE IF NOT EXISTS dsco_order_sync (
   id                    bigserial PRIMARY KEY,
 
   po_number             text     NOT NULL,
-  dsco_order_id         text     NOT NULL DEFAULT '',
-  consumer_order_number text     NOT NULL DEFAULT '',
-  channel               text     NOT NULL DEFAULT '',
 
   dsco_create_time      bigint   NOT NULL,
   status                smallint NOT NULL,
@@ -32,7 +29,7 @@ CREATE TABLE IF NOT EXISTS dsco_order_sync (
   mskus                 text[]   NOT NULL DEFAULT '{}'::text[],
   warehouse_id          text     NOT NULL DEFAULT '',
   shipment              text     NOT NULL DEFAULT '',
-  dsco_retainer_id      text     NOT NULL DEFAULT '',
+  dsco_retailer_id      text     NOT NULL DEFAULT '',
 
   shipped_tracking_no   text     NOT NULL DEFAULT '',
   dsco_invoice_id       text     NOT NULL DEFAULT '',
@@ -50,12 +47,6 @@ CREATE INDEX IF NOT EXISTS idx_dsco_order_sync_create_time
 CREATE INDEX IF NOT EXISTS idx_dsco_order_sync_status_create_time
   ON dsco_order_sync (status, dsco_create_time DESC);
 
-CREATE INDEX IF NOT EXISTS idx_dsco_order_sync_dsco_order_id
-  ON dsco_order_sync (dsco_order_id);
-
-CREATE INDEX IF NOT EXISTS idx_dsco_order_sync_channel
-  ON dsco_order_sync (channel);
-
 CREATE INDEX IF NOT EXISTS idx_dsco_order_sync_warehouse_id
   ON dsco_order_sync (warehouse_id);
 
@@ -71,9 +62,7 @@ CREATE INDEX IF NOT EXISTS idx_dsco_order_sync_mskus_gin
 
 COMMENT ON TABLE dsco_order_sync IS 'DSCO 订单同步状态表（状态机 1~5 + 原始 payload；允许覆盖更新）';
 COMMENT ON COLUMN dsco_order_sync.po_number IS 'DSCO 订单唯一键（po_number；同时也是领星 platform_order_no）';
-COMMENT ON COLUMN dsco_order_sync.dsco_order_id IS 'DSCO 订单 ID（用于查询/对账）';
-COMMENT ON COLUMN dsco_order_sync.consumer_order_number IS '参考信息：consumerOrderNumber（用于查询/对账）';
-COMMENT ON COLUMN dsco_order_sync.channel IS '渠道/店铺标识（用于 mapping.shop 与查询筛选）';
+COMMENT ON COLUMN dsco_order_sync.dsco_retailer_id IS 'DSCO retailer id（用于 mapping.shop 与查询筛选）';
 COMMENT ON COLUMN dsco_order_sync.dsco_create_time IS 'DSCO 订单 created_at（UTC 秒级时间戳；用于增量拉单与筛选）';
 COMMENT ON COLUMN dsco_order_sync.status IS '同步状态：1待同步（推单到领星）2待确认（回传 ack）3待发货回传（已确认）4待发票回传（已发货）5完成（已回传发票）';
 COMMENT ON COLUMN dsco_order_sync.payload IS 'DSCO 原始订单 JSON（覆盖更新）';
@@ -130,4 +119,3 @@ COMMENT ON COLUMN dsco_warehouse_sync.status IS '同步状态：1成功 2失败'
 COMMENT ON COLUMN dsco_warehouse_sync.reason IS '失败原因（一期默认不写入，仅保留字段扩展位）';
 COMMENT ON COLUMN dsco_warehouse_sync.created_at IS '创建时间（UTC 秒级时间戳）';
 COMMENT ON COLUMN dsco_warehouse_sync.updated_at IS '更新时间（UTC 秒级时间戳）';
-

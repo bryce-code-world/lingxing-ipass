@@ -18,14 +18,12 @@ func NewDSCOOrderSyncStore(db *gorm.DB) *DSCOOrderSyncStore {
 }
 
 type DSCOOrderSyncListFilter struct {
-	StartTime               *int64
-	EndTime                 *int64
-	StatusIn                []int16
-	PONumberLike            string
-	DSCOOrderID             string
-	ConsumerOrderNumberLike string
-	Channel                 string
-	MSKU                    string // filter: sku = ANY(mskus)
+	StartTime      *int64
+	EndTime        *int64
+	StatusIn       []int16
+	PONumberLike   string
+	DSCOREtailerID string
+	MSKU           string // filter: sku = ANY(mskus)
 
 	Offset int
 	Limit  int
@@ -44,14 +42,12 @@ func (s *DSCOOrderSyncStore) Upsert(ctx context.Context, row DSCOOrderSyncRow) e
 	// Use SQL upsert to ensure overwrite payload/status is allowed.
 	return s.db.WithContext(ctx).Exec(
 		`INSERT INTO dsco_order_sync
-		    (po_number, dsco_order_id, consumer_order_number, channel, dsco_create_time, status, payload, mskus, warehouse_id, shipment, shipped_tracking_no, dsco_invoice_id, created_at, updated_at)
+		    (po_number, dsco_create_time, dsco_retailer_id, status, payload, mskus, warehouse_id, shipment, shipped_tracking_no, dsco_invoice_id, created_at, updated_at)
 		 VALUES
-		    (?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?)
+		    (?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT (po_number) DO UPDATE SET
-		    dsco_order_id=EXCLUDED.dsco_order_id,
-		    consumer_order_number=EXCLUDED.consumer_order_number,
-		    channel=EXCLUDED.channel,
 		    dsco_create_time=EXCLUDED.dsco_create_time,
+		    dsco_retailer_id=EXCLUDED.dsco_retailer_id,
 		    status=EXCLUDED.status,
 		    payload=EXCLUDED.payload,
 		    mskus=EXCLUDED.mskus,
@@ -60,8 +56,7 @@ func (s *DSCOOrderSyncStore) Upsert(ctx context.Context, row DSCOOrderSyncRow) e
 		    shipped_tracking_no=EXCLUDED.shipped_tracking_no,
 		    dsco_invoice_id=EXCLUDED.dsco_invoice_id,
 		    updated_at=EXCLUDED.updated_at`,
-		row.PONumber, row.DSCOOrderID, row.ConsumerOrderNumber, row.Channel,
-		row.DSCOCreateTime, row.Status, string(row.Payload), row.MSKUs,
+		row.PONumber, row.DSCOCreateTime, row.DSCOREtailerID, row.Status, string(row.Payload), row.MSKUs,
 		row.WarehouseID, row.Shipment, row.ShippedTrackingNo, row.DSCOInvoiceID,
 		row.CreatedAt, row.UpdatedAt,
 	).Error
@@ -100,14 +95,8 @@ func (s *DSCOOrderSyncStore) List(ctx context.Context, f DSCOOrderSyncListFilter
 	if strings.TrimSpace(f.PONumberLike) != "" {
 		q = q.Where("po_number ILIKE ?", "%"+strings.TrimSpace(f.PONumberLike)+"%")
 	}
-	if strings.TrimSpace(f.DSCOOrderID) != "" {
-		q = q.Where("dsco_order_id = ?", strings.TrimSpace(f.DSCOOrderID))
-	}
-	if strings.TrimSpace(f.ConsumerOrderNumberLike) != "" {
-		q = q.Where("consumer_order_number ILIKE ?", "%"+strings.TrimSpace(f.ConsumerOrderNumberLike)+"%")
-	}
-	if strings.TrimSpace(f.Channel) != "" {
-		q = q.Where("channel = ?", strings.TrimSpace(f.Channel))
+	if strings.TrimSpace(f.DSCOREtailerID) != "" {
+		q = q.Where("dsco_retailer_id = ?", strings.TrimSpace(f.DSCOREtailerID))
 	}
 	if strings.TrimSpace(f.MSKU) != "" {
 		q = q.Where("? = ANY(mskus)", strings.TrimSpace(f.MSKU))
