@@ -35,9 +35,12 @@ var (
 		// "U23FJHNUS4AOVAETQVW4I2",
 		// "J5DRL5M541B6BLCPOM2WER",
 		// "T77OMD7909R5CD4DZK38O4",
-		"5J7PMN8NH5DSBCXL2M1Y",
-		"DJLLQWTZX5CA85ZWN1NL",
+		// "YNMLAX1Z44KBBYQ9Q5C3",
+		// "5J7PMN8NH5DSBCXL2M1Y",
+		// "DJLLQWTZX5CA85ZWN1NL",
 		"S5S71DCU8X8QMVEMFRSE",
+		"T77OMD7909R5CD4DZK38O4",
+		"P5E9VZQYS8A7MVWZMRZC",
 	}
 )
 
@@ -73,7 +76,7 @@ func TestBoarding_Order_Method1_GetOrderObject(t *testing.T) {
 	defer cancel()
 
 	for _, no := range orderTestOrderNumbers {
-		o, res, err := cli.Order.GetByKeyWithRawBody(ctx, orderKeyForGetOrderObject, no, nil)
+		o, _, err := cli.Order.GetByKeyWithRawBody(ctx, orderKeyForGetOrderObject, no, nil)
 		if err != nil {
 			t.Fatalf("GetByKey orderKey=%s value=%s: %v", orderKeyForGetOrderObject, no, err)
 		}
@@ -83,8 +86,9 @@ func TestBoarding_Order_Method1_GetOrderObject(t *testing.T) {
 		t.Logf("get order ok: value=%s dscoOrderId=%s poNumber=%s lineItems=%d", no, o.DscoOrderID, o.PoNumber, len(o.LineItems))
 		// fmt.Printf("order: %+v\n", o.LineItems)
 		// fmt.Println(*o.Shipping.Country, *o.Shipping.State, o.Shipping.City, o.Shipping.Address, *o.Shipping.Name)
-		fmt.Println(*o.DscoRetailerID, o.PoNumber, *o.RequestedWarehouseCode, *o.ShipWarehouseCode)
-		fmt.Println("Raw response:", res)
+		// fmt.Println(*o.DscoRetailerID, o.PoNumber, *o.RequestedWarehouseCode, *o.ShipWarehouseCode)
+		// fmt.Println("Raw response:", res)
+		fmt.Println(o.DscoStatus, o.Packages)
 		// for _, li := range o.LineItems {
 		// 	t.Logf("lineItem: %+v", li)
 		// }

@@ -1,14 +1,17 @@
 package dsco_lingxing
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"example.com/lingxing/golib/v2/sdk/dsco"
+	"example.com/lingxing/golib/v2/sdk/lingxing"
 
 	"lingxingipass/infra/runtimecfg"
 )
@@ -83,6 +86,97 @@ func decodeDSCOOrder(payload json.RawMessage) (dsco.Order, error) {
 		return dsco.Order{}, err
 	}
 	return o, nil
+}
+
+func uniqueNonEmptyStrings(items []string) []string {
+	seen := make(map[string]struct{}, len(items))
+	out := make([]string, 0, len(items))
+	for _, it := range items {
+		s := strings.TrimSpace(it)
+		if s == "" {
+			continue
+		}
+		if _, ok := seen[s]; ok {
+			continue
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	return out
+}
+
+func chunkStrings(items []string, chunkSize int) [][]string {
+	if chunkSize <= 0 {
+		chunkSize = 50
+	}
+	if len(items) == 0 {
+		return nil
+	}
+	var out [][]string
+	for i := 0; i < len(items); i += chunkSize {
+		j := i + chunkSize
+		if j > len(items) {
+			j = len(items)
+		}
+		out = append(out, items[i:j])
+	}
+	return out
+}
+
+// poNumberFromLingXingOrderDetail 从领星订单详情中提取 platform_order_no（即 DSCO poNumber）。
+//
+// 说明：OrderDetailV2 的“平台单号”字段在 PlatformInfo 列表中。
+func poNumberFromLingXingOrderDetail(d lingxing.OrderDetailV2) string {
+	for _, p := range d.PlatformInfo {
+		if s := strings.TrimSpace(p.PlatformOrderNo); s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
+const dscoOrderKeyPoNumber = "poNumber"
+
+// fetchDSCOOrdersByPONumbers 根据 poNumber 批量获取 DSCO 订单对象（用于检查 dscoStatus）。
+//
+// 注意：
+//   - DSCO OpenAPI 并未提供“按 poNumber 列表批量查询订单对象”的接口；
+//     /order/page 只能按时间窗或 consumerOrderNumber 查。
+//   - 因此这里采用“并发受限的逐单 GET /order/（orderKey=poNumber）”，以减少总耗时，同时避免触发 DSCO 的限流。
+func fetchDSCOOrdersByPONumbers(ctx context.Context, cli *dsco.Client, poNumbers []string, maxConcurrent int) map[string]dsco.Order {
+	poNumbers = uniqueNonEmptyStrings(poNumbers)
+	if len(poNumbers) == 0 || cli == nil {
+		return map[string]dsco.Order{}
+	}
+	if maxConcurrent <= 0 {
+		maxConcurrent = 5
+	}
+
+	sem := make(chan struct{}, maxConcurrent)
+	out := make(map[string]dsco.Order, len(poNumbers))
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
+	for _, po := range poNumbers {
+		po := po
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			o, err := cli.Order.GetByKey(ctx, dscoOrderKeyPoNumber, po, nil)
+			if err != nil || o == nil {
+				return
+			}
+			mu.Lock()
+			out[po] = *o
+			mu.Unlock()
+		}()
+	}
+
+	wg.Wait()
+	return out
 }
 
 func getDSCOShipMethod(o dsco.Order) string {

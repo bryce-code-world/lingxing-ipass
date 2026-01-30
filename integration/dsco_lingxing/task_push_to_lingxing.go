@@ -43,7 +43,53 @@ func (d *Domain) PushToLingXing(ctx integration.TaskContext) error {
 		return err
 	}
 
+	// 4) 幂等检查（批量）：本批次所有 poNumber 一次性查询，避免逐单调用导致触发 API 限制。
+	//
+	// 说明：
+	// - SDK 的 GetOrderDetailV2 底层也是调用 /pb/mp/order/v2/list，但一次只查 1 个。
+	// - 这里直接按批次查 list，并按需降级到逐单查询，兼顾效率与稳定性。
+	poNumbers := make([]string, 0, len(items))
+	for _, it := range items {
+		poNumbers = append(poNumbers, it.PONumber)
+	}
+	poNumbers = uniqueNonEmptyStrings(poNumbers)
+	existing := make(map[string]lingxing.OrderDetailV2, len(poNumbers))
+	includeDelete := true
+	const maxBatch = 50
+	for _, chunk := range chunkStrings(poNumbers, maxBatch) {
+		out, err := lx.Order.ListOrdersV2(taskCtx, lingxing.OrderListV2Request{
+			Offset:           0,
+			Length:           len(chunk),
+			PlatformOrderNos: chunk,
+			IncludeDelete:    &includeDelete,
+		})
+		if err != nil {
+			// 降级：逐单查（尽量不因为一次 list 失败影响整个批次）
+			logger.Warn(taskCtx, "lingxing list orders failed, fallback to per-order check", "err", err)
+			for _, po := range chunk {
+				detail, derr := lx.Order.GetOrderDetailV2(taskCtx, lingxing.OrderDetailV2Request{PlatformOrderNo: po})
+				if derr == nil {
+					existing[po] = detail
+				}
+			}
+			continue
+		}
+		for _, detail := range out.List {
+			if po := poNumberFromLingXingOrderDetail(detail); po != "" {
+				existing[po] = detail
+			}
+		}
+	}
+
 	for _, row := range items {
+		// 4.1) 若领星已存在该 poNumber，则不再创建，直接推进状态到 2。
+		if _, ok := existing[row.PONumber]; ok {
+			if err := d.orderStore.UpdateStatusAndFields(taskCtx, row.PONumber, 2, "", ""); err != nil {
+				logger.Warn(taskCtx, "update status failed", "err", err)
+			}
+			continue
+		}
+
 		// 2.1) 解析 DSCO 原始订单 payload（payload 保留原始 JSON，方便审计/排查）
 		order, err := decodeDSCOOrder(row.Payload)
 		if err != nil {
@@ -91,14 +137,6 @@ func (d *Domain) PushToLingXing(ctx integration.TaskContext) error {
 				logger.Warn(taskCtx, "missing mapping.shipment for logistics_type_id", "po_number", order.PoNumber, "key", key)
 				continue
 			}
-		}
-
-		// 4) 幂等：若领星已存在该 poNumber，则不再创建，直接推进状态到 2。
-		if _, err := lx.Order.GetOrderDetailV2(taskCtx, lingxing.OrderDetailV2Request{PlatformOrderNo: order.PoNumber}); err == nil {
-			if err := d.orderStore.UpdateStatusAndFields(taskCtx, order.PoNumber, 2, "", ""); err != nil {
-				logger.Warn(taskCtx, "update status failed", "err", err)
-			}
-			continue
 		}
 
 		// 2.2) 地址校验（MVP：仅校验最小必填；更严格校验后续可根据日志再补）

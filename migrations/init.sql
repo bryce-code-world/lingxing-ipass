@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS dsco_order_sync (
   po_number             text     NOT NULL,
 
   dsco_create_time      bigint   NOT NULL,
+  dsco_status           text     NOT NULL DEFAULT '',
   status                smallint NOT NULL,
 
   payload               jsonb    NOT NULL,
@@ -63,6 +64,7 @@ CREATE INDEX IF NOT EXISTS idx_dsco_order_sync_mskus_gin
 COMMENT ON TABLE dsco_order_sync IS 'DSCO 订单同步状态表（状态机 1~5 + 原始 payload；允许覆盖更新）';
 COMMENT ON COLUMN dsco_order_sync.po_number IS 'DSCO 订单唯一键（po_number；同时也是领星 platform_order_no）';
 COMMENT ON COLUMN dsco_order_sync.dsco_retailer_id IS 'DSCO retailer id（用于 mapping.shop 与查询筛选）';
+COMMENT ON COLUMN dsco_order_sync.dsco_status IS 'DSCO 订单拉取时状态（例如 created、shipment_pending、shipped、completed）';
 COMMENT ON COLUMN dsco_order_sync.dsco_create_time IS 'DSCO 订单 created_at（UTC 秒级时间戳；用于增量拉单与筛选）';
 COMMENT ON COLUMN dsco_order_sync.status IS '同步状态：1待同步（推单到领星）2待确认（回传 ack）3待发货回传（已确认）4待发票回传（已发货）5完成（已回传发票）';
 COMMENT ON COLUMN dsco_order_sync.payload IS 'DSCO 原始订单 JSON（覆盖更新）';
