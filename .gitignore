@@ -6,3 +6,4 @@ logs/
 .env.admin
 docker
 env.yaml
+deploy

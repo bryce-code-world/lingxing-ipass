@@ -93,12 +93,13 @@ func ValidateEnv(cfg EnvConfig) error {
 	default:
 		return errors.New("base.env 必须为 dev/test/release")
 	}
+
 	if cfg.Admin.Password == "" {
 		return errors.New("admin.password 不能为空")
 	}
 	// display_timezone default is applied in LoadEnvYAML.
 	if _, err := time.LoadLocation(normalizeDisplayTimezone(cfg.Admin.DisplayTimezone)); err != nil {
-		return errors.New("admin.display_timezone invalid (IANA timezone like UTC/Asia/Shanghai)")
+		return errors.New("admin.display_timezone 无效（需 IANA 时区，例如 UTC/Asia/Shanghai）")
 	}
 	if cfg.Admin.Export.Dir == "" {
 		return errors.New("admin.export.dir 不能为空")
@@ -109,21 +110,17 @@ func ValidateEnv(cfg EnvConfig) error {
 	if cfg.Admin.Export.CleanupThresholdBytes <= 0 {
 		return errors.New("admin.export.cleanup_threshold_bytes 必须为正整数")
 	}
+
 	if cfg.Auth.DSCO.Token == "" {
 		return errors.New("auth.dsco.token 不能为空")
 	}
 	if cfg.Auth.LingXing.AppID == "" || cfg.Auth.LingXing.AppSecret == "" {
 		return errors.New("auth.lingxing.app_id/app_secret 不能为空")
 	}
-	if cfg.Integration.DSCO.BaseURL == "" {
-		// optional: SDK has defaults
-	}
-	if cfg.Integration.LingXing.BaseURL == "" {
-		// optional: SDK has defaults
-	}
 	if cfg.Integration.LingXing.PlatformCode == 0 {
 		return errors.New("integration.lingxing.platform_code 不能为空/必须为正整数")
 	}
 
+	// integration.*.base_url 允许为空（SDK 有默认 BaseURL）
 	return nil
 }

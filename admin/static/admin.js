@@ -96,6 +96,13 @@ function normalizeTZ(raw) {
 const ADMIN_TZ_RAW = (typeof window !== "undefined" && window.ADMIN_TZ) ? window.ADMIN_TZ : "UTC";
 let ADMIN_TZ = normalizeTZ(ADMIN_TZ_RAW);
 
+function tzForIntl(tz) {
+  // 兼容：部分运行环境不接受 "UTC"，但接受 "Etc/UTC"。
+  const s = (tz || "").trim();
+  if (s === "UTC") return "Etc/UTC";
+  return s || "Etc/UTC";
+}
+
 function setTZLabel() {
   const el = qs("tzLabel");
   if (el) el.textContent = ADMIN_TZ || "UTC";
@@ -108,7 +115,7 @@ function fmtUnixSec(sec) {
   let dtf;
   try {
     dtf = new Intl.DateTimeFormat("sv-SE", {
-      timeZone: ADMIN_TZ,
+      timeZone: tzForIntl(ADMIN_TZ),
       year: "numeric",
       month: "2-digit",
       day: "2-digit",
@@ -120,7 +127,7 @@ function fmtUnixSec(sec) {
   } catch (e) {
     ADMIN_TZ = "UTC";
     dtf = new Intl.DateTimeFormat("sv-SE", {
-      timeZone: "UTC",
+      timeZone: "Etc/UTC",
       year: "numeric",
       month: "2-digit",
       day: "2-digit",
@@ -138,7 +145,7 @@ function getZonedPartsFromUTC(ms, tz) {
   let dtf;
   try {
     dtf = new Intl.DateTimeFormat("en-CA", {
-      timeZone: tz,
+      timeZone: tzForIntl(tz),
       year: "numeric",
       month: "2-digit",
       day: "2-digit",
@@ -149,7 +156,7 @@ function getZonedPartsFromUTC(ms, tz) {
     });
   } catch (e) {
     dtf = new Intl.DateTimeFormat("en-CA", {
-      timeZone: "UTC",
+      timeZone: "Etc/UTC",
       year: "numeric",
       month: "2-digit",
       day: "2-digit",
@@ -354,7 +361,7 @@ async function adminLoadOrders(offset) {
       const skuText = skus.join(", ");
       const skuShow = skuText.length > 40 ? (skuText.slice(0, 40) + "...") : skuText;
       const tr = document.createElement("tr");
-      tr.innerHTML = `<td>${it.id}</td><td><code>${it.po_number}</code></td><td title="${it.dsco_create_time}">${fmtUnixSec(it.dsco_create_time)}</td><td>${it.dsco_status || ""}</td><td>${it.status}</td><td>${it.warehouse_id}</td><td>${it.shipment}</td><td>${it.dsco_retailer_id || ""}</td><td title="${skuText.replace(/\"/g, '&quot;')}"><code>${skuShow}</code></td><td>${it.shipped_tracking_no}</td><td>${it.dsco_invoice_id}</td><td><button class="btn" onclick='adminOpenEditOrderStatus(${poJSON}, ${it.status})'>Edit</button></td>`;
+      tr.innerHTML = `<td>${it.id}</td><td><code>${it.po_number}</code></td><td title="${it.dsco_create_time}">${fmtUnixSec(it.dsco_create_time)}</td><td>${it.dsco_status || ""}</td><td>${it.status}</td><td>${it.warehouse_id}</td><td>${it.shipment}</td><td>${it.dsco_retailer_id || ""}</td><td title="${skuText.replace(/\"/g, '&quot;')}"><code>${skuShow}</code></td><td>${it.shipped_tracking_no}</td><td>${it.dsco_invoice_id}</td><td><button class="btn" onclick="adminViewOrderDetail(${it.id})">View</button> <button class="btn" onclick='adminOpenEditOrderStatus(${poJSON}, ${it.status})'>Edit</button></td>`;
       tbody.appendChild(tr);
     }
   } catch (e) {
@@ -397,6 +404,23 @@ function closeModal(id) {
   m.style.display = "none";
 }
 
+async function copyToClipboard(text) {
+  const s = String(text || "");
+  if (!s) return;
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    await navigator.clipboard.writeText(s);
+    return;
+  }
+  const ta = document.createElement("textarea");
+  ta.value = s;
+  ta.style.position = "fixed";
+  ta.style.left = "-9999px";
+  document.body.appendChild(ta);
+  ta.select();
+  document.execCommand("copy");
+  ta.remove();
+}
+
 function statusLabel(status) {
   switch (Number(status)) {
     case 1: return "1 待同步（推单到领星）";
@@ -420,6 +444,31 @@ function adminOpenEditOrderStatus(poNumber, currentStatus) {
   if (sel) sel.value = String(currentStatus || 1);
   if (tip) tip.textContent = "当前状态：" + statusLabel(currentStatus);
   openModal("editStatusModal");
+}
+
+async function adminViewOrderDetail(id) {
+  try {
+    const n = Number(id);
+    if (!Number.isFinite(n) || n <= 0) return showToast("invalid id");
+    const data = await apiJSON("GET", "/admin/api/dsco_order_sync/detail?id=" + encodeURIComponent(String(n)));
+    qs("orderDetailTitle").textContent = "Order Detail";
+    qs("orderDetailMeta").textContent = `id=${data.id}, po_number=${data.po_number || ""}`;
+    const txt = JSON.stringify(data, null, 2);
+    qs("orderDetailText").textContent = txt;
+    openModal("orderDetailModal");
+  } catch (e) {
+    showToast("Detail: " + e.message);
+  }
+}
+
+async function adminCopyOrderDetail() {
+  try {
+    const txt = qs("orderDetailText")?.textContent || "";
+    await copyToClipboard(txt);
+    showToast("Copied: OK");
+  } catch (e) {
+    showToast("Copy: " + e.message);
+  }
 }
 
 async function adminSaveOrderStatus() {

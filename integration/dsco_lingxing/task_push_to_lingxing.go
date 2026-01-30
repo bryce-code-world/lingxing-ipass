@@ -170,10 +170,11 @@ func (d *Domain) PushToLingXing(ctx integration.TaskContext) error {
 		createItems := make([]lingxing.CreateOrderItemV2, 0, len(order.LineItems))
 		for _, li := range order.LineItems {
 			msku := ""
-			if li.SKU != nil && *li.SKU != "" {
-				msku = *li.SKU
-			} else if li.PartnerSKU != nil && *li.PartnerSKU != "" {
+			// 一期口径：优先使用 DSCO partnerSku，否则使用 sku。
+			if li.PartnerSKU != nil && *li.PartnerSKU != "" {
 				msku = *li.PartnerSKU
+			} else if li.SKU != nil && *li.SKU != "" {
+				msku = *li.SKU
 			}
 			if msku == "" {
 				continue

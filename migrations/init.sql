@@ -61,17 +61,16 @@ CREATE INDEX IF NOT EXISTS idx_dsco_order_sync_dsco_invoice_id
 CREATE INDEX IF NOT EXISTS idx_dsco_order_sync_mskus_gin
   ON dsco_order_sync USING GIN (mskus);
 
-COMMENT ON TABLE dsco_order_sync IS 'DSCO 订单同步状态表（状态机 1~5 + 原始 payload；允许覆盖更新）';
+COMMENT ON TABLE dsco_order_sync IS 'DSCO 订单同步状态表（状态机 1~6 + 原始 payload；允许覆盖更新）';
 COMMENT ON COLUMN dsco_order_sync.po_number IS 'DSCO 订单唯一键（po_number；同时也是领星 platform_order_no）';
-COMMENT ON COLUMN dsco_order_sync.dsco_retailer_id IS 'DSCO retailer id（用于 mapping.shop 与查询筛选）';
 COMMENT ON COLUMN dsco_order_sync.dsco_status IS 'DSCO 订单拉取时状态（例如 created、shipment_pending、shipped、completed）';
 COMMENT ON COLUMN dsco_order_sync.dsco_create_time IS 'DSCO 订单 created_at（UTC 秒级时间戳；用于增量拉单与筛选）';
-COMMENT ON COLUMN dsco_order_sync.status IS '同步状态：1待同步（推单到领星）2待确认（回传 ack）3待发货回传（已确认）4待发票回传（已发货）5完成（已回传发票）6（已取消）';
+COMMENT ON COLUMN dsco_order_sync.status IS '同步状态：1待推单到领星 2待ACK回传 3待回传物流(shipment) 4待回传发票(invoice) 5完成(已回传发票；或拉单时 dsco_status=shipped 直接完成) 6已取消';
 COMMENT ON COLUMN dsco_order_sync.payload IS 'DSCO 原始订单 JSON（覆盖更新）';
 COMMENT ON COLUMN dsco_order_sync.mskus IS '订单 SKU 列表（用于筛选/导出）';
 COMMENT ON COLUMN dsco_order_sync.warehouse_id IS 'DSCO 仓库编码（warehouseCode；用于 mapping.warehouse 与筛选/导出）';
 COMMENT ON COLUMN dsco_order_sync.shipment IS 'DSCO 物流方式编码（shipMethod；用于 mapping.shipment 与筛选/导出）';
-COMMENT ON COLUMN dsco_order_sync.dsco_retainer_id IS '订单关联的 dsco 标记销售渠道 ID 信息';
+COMMENT ON COLUMN dsco_order_sync.dsco_retailer_id IS '订单关联的 DSCO 销售渠道 ID（dscoRetailerId；用于 mapping.shop 与筛选/导出）';
 COMMENT ON COLUMN dsco_order_sync.shipped_tracking_no IS '已回传的物流运单号（trackingNumber；用于筛选/导出）';
 COMMENT ON COLUMN dsco_order_sync.dsco_invoice_id IS '已回传的发票 ID（invoiceId；用于筛选/导出）';
 COMMENT ON COLUMN dsco_order_sync.created_at IS '创建时间（UTC 秒级时间戳）';

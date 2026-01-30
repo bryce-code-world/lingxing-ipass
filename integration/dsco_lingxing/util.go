@@ -37,8 +37,8 @@ func parseLingXingDateTimeToRFC3339UTC(s string) (string, error) {
 	if s == "" {
 		return "", errors.New("time empty")
 	}
-	// LingXing often returns "2006-01-02 15:04:05" without timezone.
-	// Current project standardizes all internal time to UTC.
+	// 领星经常返回 "2006-01-02 15:04:05"（无时区）。
+	// 本项目内部时间统一使用 UTC。
 	t, err := time.ParseInLocation("2006-01-02 15:04:05", s, time.UTC)
 	if err != nil {
 		return "", err
@@ -140,9 +140,8 @@ const dscoOrderKeyPoNumber = "poNumber"
 // fetchDSCOOrdersByPONumbers 根据 poNumber 批量获取 DSCO 订单对象（用于检查 dscoStatus）。
 //
 // 注意：
-//   - DSCO OpenAPI 并未提供“按 poNumber 列表批量查询订单对象”的接口；
-//     /order/page 只能按时间窗或 consumerOrderNumber 查。
-//   - 因此这里采用“并发受限的逐单 GET /order/（orderKey=poNumber）”，以减少总耗时，同时避免触发 DSCO 的限流。
+// - DSCO OpenAPI 未提供“按 poNumber 列表批量查询订单对象”的接口。
+// - 因此这里采用“并发受限的逐单 GET /order/（orderKey=poNumber）”，减少总耗时并避免触发限流。
 func fetchDSCOOrdersByPONumbers(ctx context.Context, cli *dsco.Client, poNumbers []string, maxConcurrent int) map[string]dsco.Order {
 	poNumbers = uniqueNonEmptyStrings(poNumbers)
 	if len(poNumbers) == 0 || cli == nil {
@@ -193,7 +192,7 @@ func getDSCOWarehouseCode(o dsco.Order) string {
 	if o.RequestedWarehouseCode != nil && strings.TrimSpace(*o.RequestedWarehouseCode) != "" {
 		return strings.TrimSpace(*o.RequestedWarehouseCode)
 	}
-	// Fallbacks exist in DSCO order schema, but are not required by our MVP.
+	// MVP：其它兜底字段当前不使用。
 	return ""
 }
 
@@ -211,9 +210,17 @@ func getDSCOShippingServiceLevelCode(o dsco.Order) string {
 }
 
 func buildReverseSKUMap(cfg runtimecfg.Config) (map[string]string, error) {
-	// 一期（已确认）：推单到领星时 SKU 不做映射，直接把 DSCO SKU 赋值到领星 MSKU，由领星侧自动匹配。
-	// 因此 runtime_config.mapping.sku 暂不使用，保留字段仅为未来扩展位。
-	return map[string]string{}, nil
+	// 一期口径：
+	// - 推单到领星：SKU 不做映射，直接把 DSCO 行项目 SKU（优先 partnerSku，否则 sku）赋值到领星建单参数 msku，由领星侧自动匹配。
+	// - 库存回写到 DSCO：需要把“领星 SKU”反向映射回“DSCO partnerSku 口径”，因此需要构建反向 map。
+	//
+	// mapping.sku（运行时配置）：
+	// - key：DSCO SKU（partnerSku 口径）
+	// - value：领星 SKU
+	if len(cfg.Mapping.SKU) == 0 {
+		return map[string]string{}, nil
+	}
+	return reverseMapStrict(cfg.Mapping.SKU)
 }
 
 func shopKeyFromDSCOOrder(o dsco.Order) string {
@@ -244,7 +251,7 @@ func dscoStatusToSyncStatus(dscoStatus string) (int16, bool) {
 	//
 	// - created          -> 1（待同步：推单到领星）
 	// - shipment_pending -> 3（待发货回传：已确认）
-	// - shipped          -> 5（完成：视为已处于后置阶段）
+	// - shipped          -> 5（完成：拉单时 DSCO 已处于 shipped，跳过后续状态机流转）
 	// - cancelled        -> 6（已取消）
 	s := strings.ToLower(strings.TrimSpace(dscoStatus))
 	switch s {

@@ -233,6 +233,23 @@ func (s *Server) apiUpdateOrderStatus(c *gin.Context) {
 }
 
 func (s *Server) apiOrderDetail(c *gin.Context) {
+	type orderDetail struct {
+		ID                int64           `json:"id"`
+		PONumber          string          `json:"po_number"`
+		DSCOCreateTime    int64           `json:"dsco_create_time"`
+		DSCOStatus        string          `json:"dsco_status"`
+		Status            int16           `json:"status"`
+		MSKUs             []string        `json:"mskus"`
+		WarehouseID       string          `json:"warehouse_id"`
+		Shipment          string          `json:"shipment"`
+		DSCOREtailerID    string          `json:"dsco_retailer_id"`
+		ShippedTrackingNo string          `json:"shipped_tracking_no"`
+		DSCOInvoiceID     string          `json:"dsco_invoice_id"`
+		Payload           json.RawMessage `json:"payload"`
+		CreatedAt         int64           `json:"created_at"`
+		UpdatedAt         int64           `json:"updated_at"`
+	}
+
 	idStr := c.Query("id")
 	if idStr == "" {
 		fail(c, http.StatusBadRequest, 400, "missing id")
@@ -253,7 +270,22 @@ func (s *Server) apiOrderDetail(c *gin.Context) {
 		fail(c, http.StatusNotFound, 404, "not found")
 		return
 	}
-	ok(c, row)
+	ok(c, orderDetail{
+		ID:                row.ID,
+		PONumber:          row.PONumber,
+		DSCOCreateTime:    row.DSCOCreateTime,
+		DSCOStatus:        row.DSCOStatus,
+		Status:            row.Status,
+		MSKUs:             []string(row.MSKUs),
+		WarehouseID:       row.WarehouseID,
+		Shipment:          row.Shipment,
+		DSCOREtailerID:    row.DSCOREtailerID,
+		ShippedTrackingNo: row.ShippedTrackingNo,
+		DSCOInvoiceID:     row.DSCOInvoiceID,
+		Payload:           row.Payload,
+		CreatedAt:         row.CreatedAt,
+		UpdatedAt:         row.UpdatedAt,
+	})
 }
 
 func (s *Server) apiManualPullOrders(c *gin.Context) {

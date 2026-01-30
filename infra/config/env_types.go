@@ -46,7 +46,7 @@ type DSCOIntegrationConfig struct {
 type LingXingIntegrationConfig struct {
 	// BaseURL 领星 API 基础地址；为空则使用 SDK 默认 BaseURLProd。
 	BaseURL string `yaml:"base_url"`
-	// PlatformCode 领星平台编码（固定值；与业务相关，仍保留在 env.yaml）。
+	// PlatformCode 领星平台编码（固定值；与业务相关，保留在 env.yaml）。
 	PlatformCode int `yaml:"platform_code"`
 }
 

@@ -136,6 +136,17 @@ body {
 .table th { color: var(--muted); font-weight: 600; }
 .table code { font-size: 12px; }
 
+.codeblock {
+  background: rgba(0,0,0,0.04);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  overflow: auto;
+  max-height: 60vh;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .alert {
   background: rgba(255,59,48,0.08);
   border: 1px solid rgba(255,59,48,0.18);
@@ -231,4 +242,3 @@ body {
   .grid { grid-template-columns: 1fr; }
   .grid2 { grid-template-columns: 1fr; }
 }
-
