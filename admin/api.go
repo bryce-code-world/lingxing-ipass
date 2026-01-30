@@ -160,6 +160,7 @@ func (s *Server) apiListOrders(c *gin.Context) {
 	filter := store.DSCOOrderSyncListFilter{
 		Offset:         parseInt(c.Query("offset"), 0),
 		Limit:          parseInt(c.Query("limit"), 50),
+		DSCOStatus:     c.Query("dsco_status"),
 		PONumberLike:   c.Query("po_number"),
 		DSCOREtailerID: c.Query("dsco_retailer_id"),
 		MSKU:           c.Query("msku"),
@@ -205,6 +206,30 @@ func (s *Server) apiListOrders(c *gin.Context) {
 	ok(c, map[string]any{"items": out, "total": total})
 }
 
+func (s *Server) apiUpdateOrderStatus(c *gin.Context) {
+	var body struct {
+		PONumber string `json:"po_number"`
+		Status   int16  `json:"status"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		fail(c, http.StatusBadRequest, 400, "invalid json")
+		return
+	}
+	if strings.TrimSpace(body.PONumber) == "" {
+		fail(c, http.StatusBadRequest, 400, "missing po_number")
+		return
+	}
+	if body.Status < 1 || body.Status > 6 {
+		fail(c, http.StatusBadRequest, 400, "invalid status")
+		return
+	}
+	if err := s.orderStore.UpdateStatus(c.Request.Context(), body.PONumber, body.Status); err != nil {
+		fail(c, http.StatusInternalServerError, 500, err.Error())
+		return
+	}
+	ok(c, map[string]any{"ok": true})
+}
+
 func (s *Server) apiOrderDetail(c *gin.Context) {
 	idStr := c.Query("id")
 	if idStr == "" {
@@ -231,9 +256,8 @@ func (s *Server) apiOrderDetail(c *gin.Context) {
 
 func (s *Server) apiManualPullOrders(c *gin.Context) {
 	var body struct {
-		Start  int64 `json:"start"`
-		End    int64 `json:"end"`
-		Status int16 `json:"status"`
+		Start int64 `json:"start"`
+		End   int64 `json:"end"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		fail(c, http.StatusBadRequest, 400, "invalid json")
@@ -241,10 +265,6 @@ func (s *Server) apiManualPullOrders(c *gin.Context) {
 	}
 	if body.Start <= 0 || body.End <= 0 || body.End <= body.Start {
 		fail(c, http.StatusBadRequest, 400, "invalid time range")
-		return
-	}
-	if body.Status < 1 || body.Status > 5 {
-		fail(c, http.StatusBadRequest, 400, "invalid status")
 		return
 	}
 	maxSec := int64(s.env.Admin.Export.MaxRangeDays) * 86400
@@ -261,7 +281,7 @@ func (s *Server) apiManualPullOrders(c *gin.Context) {
 		Job:      runtimecfg.JobPullDSCOOrders,
 		Trigger:  integration.TriggerManual,
 		Size:     0,
-		Override: integration.PullDSCOOrdersOverride{Start: body.Start, End: body.End, Status: body.Status},
+		Override: integration.PullDSCOOrdersOverride{Start: body.Start, End: body.End},
 	})
 	if err != nil {
 		switch {

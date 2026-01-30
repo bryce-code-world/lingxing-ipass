@@ -77,7 +77,10 @@ function initGlobalUI() {
     if (mask) mask.addEventListener("click", hideToast);
   }
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") hideToast();
+    if (e.key === "Escape") {
+      hideToast();
+      closeModal("editStatusModal");
+    }
   });
 }
 
@@ -281,8 +284,7 @@ async function adminManualPull() {
     const endP = parseDateTimeLocal(qs("pullEndDT")?.value || "");
     const start = startP ? zonedDateTimeToUnixSec(startP, ADMIN_TZ) : 0;
     const end = endP ? zonedDateTimeToUnixSec(endP, ADMIN_TZ) : 0;
-    const status = parseInt((qs("pullStatus")?.value || "").trim(), 10);
-    await apiJSON("POST", "/admin/api/dsco_order_sync/pull", { start, end, status });
+    await apiJSON("POST", "/admin/api/dsco_order_sync/pull", { start, end });
     showToast("Manual pull: OK");
   } catch (e) {
     showToast("Manual pull: " + e.message);
@@ -324,6 +326,7 @@ function ordersFilter() {
   set("po_number", (qs("qPo")?.value || "").trim());
   set("dsco_retailer_id", (qs("qRetailer")?.value || "").trim());
   set("msku", (qs("qMSKU")?.value || "").trim());
+  set("dsco_status", (qs("qDscoStatus")?.value || "").trim());
   set("status", (qs("qStatus")?.value || "").trim());
   const s = parseDateTimeLocal(qs("qStartDT")?.value || "");
   const e = parseDateTimeLocal(qs("qEndDT")?.value || "");
@@ -346,8 +349,9 @@ async function adminLoadOrders(offset) {
     if (!tbody) return;
     tbody.innerHTML = "";
     for (const it of (data.items || [])) {
+      const poJSON = JSON.stringify(it.po_number || "");
       const tr = document.createElement("tr");
-      tr.innerHTML = `<td>${it.id}</td><td><code>${it.po_number}</code></td><td title="${it.dsco_create_time}">${fmtUnixSec(it.dsco_create_time)}</td><td>${it.dsco_status || ""}</td><td>${it.status}</td><td>${it.warehouse_id}</td><td>${it.shipment}</td><td>${it.dsco_retailer_id || ""}</td><td>${it.shipped_tracking_no}</td><td>${it.dsco_invoice_id}</td>`;
+      tr.innerHTML = `<td>${it.id}</td><td><code>${it.po_number}</code></td><td title="${it.dsco_create_time}">${fmtUnixSec(it.dsco_create_time)}</td><td>${it.dsco_status || ""}</td><td>${it.status}</td><td>${it.warehouse_id}</td><td>${it.shipment}</td><td>${it.dsco_retailer_id || ""}</td><td>${it.shipped_tracking_no}</td><td>${it.dsco_invoice_id}</td><td><button class="btn" onclick='adminOpenEditOrderStatus(${poJSON}, ${it.status})'>Edit</button></td>`;
       tbody.appendChild(tr);
     }
   } catch (e) {
@@ -367,6 +371,7 @@ async function adminExportOrders() {
     if (f.start) body.startTime = parseInt(f.start, 10);
     if (f.end) body.endTime = parseInt(f.end, 10);
     if (f.status) body.statusIn = f.status.split(",").map(s => parseInt(s.trim(), 10)).filter(n => !Number.isNaN(n));
+    if (f.dsco_status) body.dscoStatus = f.dsco_status;
     if (f.po_number) body.poNumberLike = f.po_number;
     if (f.dsco_retailer_id) body.dscoRetailerId = f.dsco_retailer_id;
     if (f.msku) body.msku = f.msku;
@@ -374,6 +379,58 @@ async function adminExportOrders() {
     showToast("Export: OK");
   } catch (e) {
     showToast("Export: " + e.message);
+  }
+}
+
+function openModal(id) {
+  const m = qs(id);
+  if (!m) return;
+  m.style.display = "block";
+}
+
+function closeModal(id) {
+  const m = qs(id);
+  if (!m) return;
+  m.style.display = "none";
+}
+
+function statusLabel(status) {
+  switch (Number(status)) {
+    case 1: return "1 待同步（推单到领星）";
+    case 2: return "2 待确认（回传 ack）";
+    case 3: return "3 待发货回传（已确认）";
+    case 4: return "4 待发票回传（已发货）";
+    case 5: return "5 完成（已回传发票）";
+    case 6: return "6 已取消";
+    default: return String(status);
+  }
+}
+
+function adminOpenEditOrderStatus(poNumber, currentStatus) {
+  const po = String(poNumber || "").trim();
+  if (!po) return showToast("missing po_number");
+
+  const poEl = qs("editStatusPo");
+  const sel = qs("editStatusSelect");
+  const tip = qs("editStatusTip");
+  if (poEl) poEl.textContent = po;
+  if (sel) sel.value = String(currentStatus || 1);
+  if (tip) tip.textContent = "当前状态：" + statusLabel(currentStatus);
+  openModal("editStatusModal");
+}
+
+async function adminSaveOrderStatus() {
+  try {
+    const po = (qs("editStatusPo")?.textContent || "").trim();
+    const status = parseInt((qs("editStatusSelect")?.value || "").trim(), 10);
+    if (!po) return showToast("missing po_number");
+    if (!Number.isFinite(status) || status < 1 || status > 6) return showToast("invalid status");
+    await apiJSON("PUT", "/admin/api/dsco_order_sync/status", { po_number: po, status });
+    closeModal("editStatusModal");
+    showToast("Update status: OK");
+    await adminLoadOrders(ordersOffset);
+  } catch (e) {
+    showToast("Update status: " + e.message);
   }
 }
 

@@ -35,6 +35,7 @@ type DSCOOrderSyncListFilter struct {
 	StartTime      *int64
 	EndTime        *int64
 	StatusIn       []int16
+	DSCOStatus     string
 	PONumberLike   string
 	DSCOREtailerID string
 	MSKU           string // filter: sku = ANY(mskus)
@@ -107,6 +108,9 @@ func (s *DSCOOrderSyncStore) List(ctx context.Context, f DSCOOrderSyncListFilter
 	if len(f.StatusIn) > 0 {
 		q = q.Where("status IN ?", f.StatusIn)
 	}
+	if strings.TrimSpace(f.DSCOStatus) != "" {
+		q = q.Where("dsco_status = ?", strings.TrimSpace(f.DSCOStatus))
+	}
 	if strings.TrimSpace(f.PONumberLike) != "" {
 		q = q.Where("po_number ILIKE ?", "%"+strings.TrimSpace(f.PONumberLike)+"%")
 	}
@@ -152,6 +156,20 @@ func (s *DSCOOrderSyncStore) GetByID(ctx context.Context, id int64) (DSCOOrderSy
 		return DSCOOrderSyncRow{}, false, err
 	}
 	return row, true, nil
+}
+
+func (s *DSCOOrderSyncStore) UpdateStatus(ctx context.Context, poNumber string, status int16) error {
+	if strings.TrimSpace(poNumber) == "" {
+		return errors.New("po_number 不能为空")
+	}
+	now := time.Now().UTC().Unix()
+	return s.db.WithContext(ctx).
+		Model(&DSCOOrderSyncRow{}).
+		Where("po_number = ?", strings.TrimSpace(poNumber)).
+		Updates(map[string]any{
+			"status":     status,
+			"updated_at": now,
+		}).Error
 }
 
 func (s *DSCOOrderSyncStore) UpdateStatusAndFields(ctx context.Context, poNumber string, status int16, trackingNo, invoiceID string) error {

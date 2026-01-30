@@ -8,14 +8,9 @@ import (
 	"example.com/lingxing/golib/v2/sdk/lingxing"
 )
 
-// 环境变量（可选）：
-// - LINGXING_CREATE_PLATFORM_CODE: 默认 10009（自定义平台）
-// - LINGXING_CREATE_STORE_ID: 店铺ID（store_id），默认空（必须设置才会调用）
-// - LINGXING_CREATE_PLATFORM_ORDER_NO: 平台订单号，默认使用当前时间生成
-// - LINGXING_CREATE_SKU: SKU，默认 "TEST-SKU-1"
-// - LINGXING_CREATE_QTY: 数量，默认 1
-//
-// 注意：这是“真实环境手动测试”，会创建订单，请谨慎使用测试店铺/测试数据。
+// 说明：
+// - 这些是“真实环境手动测试”（boarding/e2e），会真实调用领星接口并可能创建/修改订单。
+// - 默认 go test ./... 会跳过（见 init.go 的 newClient）。
 func TestOrderService_CreateOrdersV2(t *testing.T) {
 	cli := newClient(t)
 	out, err := cli.Order.CreateOrdersV2(context.Background(), lingxing.CreateOrdersV2Request{
@@ -40,13 +35,12 @@ func TestOrderService_CreateOrdersV2(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateOrdersV2() err=%v", err)
 	}
-
 	fmt.Println("CreateOrdersV2 resp:", out)
 }
 
 // 获取订单列表
 //
-// go test -v -count=1 .\init.go .\order_test.go -run TestOrderService_ListOrdersV2
+// go test -v -count=1 .\\init.go .\\order_test.go -run TestOrderService_ListOrdersV2
 func TestOrderService_ListOrdersV2(t *testing.T) {
 	cli := newClient(t)
 	out, res, err := cli.Order.ListOrdersV2WithRawBody(context.Background(), lingxing.OrderListV2Request{
@@ -83,7 +77,6 @@ func TestOrderService_EditOrderV2(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EditOrderV2() err=%v", err)
 	}
-
 	fmt.Println("EditOrderV2 resp:", raw)
 }
 
@@ -94,6 +87,5 @@ func TestOrderService_UpdateOrderV2(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpdateOrderV2() err=%v", err)
 	}
-
 	fmt.Println("UpdateOrderV2 resp:", out)
 }

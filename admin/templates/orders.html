@@ -6,6 +6,13 @@
       <input class="input sm" id="qPo" placeholder="po_number like" />
       <input class="input sm" id="qRetailer" placeholder="dsco_retailer_id" />
       <input class="input sm" id="qMSKU" placeholder="msku" />
+      <select class="select sm" id="qDscoStatus">
+        <option value="">dsco_status (all)</option>
+        <option value="created">created</option>
+        <option value="shipment_pending">shipment_pending</option>
+        <option value="shipped">shipped</option>
+        <option value="cancelled">cancelled</option>
+      </select>
       <input class="input sm" id="qStatus" placeholder="status (e.g. 1,2,3)" />
       <input class="input sm" id="qStartDT" type="datetime-local" />
       <input class="input sm" id="qEndDT" type="datetime-local" />
@@ -40,6 +47,7 @@
           <th>dsco_retailer_id</th>
           <th>tracking</th>
           <th>invoice_id</th>
+          <th>actions</th>
         </tr>
       </thead>
       <tbody></tbody>

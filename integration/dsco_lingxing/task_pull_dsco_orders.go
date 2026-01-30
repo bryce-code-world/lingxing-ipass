@@ -17,12 +17,13 @@ import (
 //
 // 一期口径：
 //  1. 计算拉取时间窗口：
-//     - 手动触发：使用 Admin 传入的 [start,end)（UTC 秒级）范围，并允许指定“入库初始状态 status”。
+//     - 手动触发：使用 Admin 传入的 [start,end)（UTC 秒级）范围；入库 status 由 DSCO 的 dsco_status 自动推导。
 //     - 定时触发：使用 dsco_order_sync.dsco_create_time 的最大值作为游标（增量拉取）。
 //     若表为空，则从 2025-01-01 00:00:00（UTC）开始往后拉取。
 //  2. 调用 DSCO Order.GetPageRaw 分页拉取（scrollId）。
 //  3. 对每条订单：
 //     - dsco_create_time：仅使用 dscoCreateDate（已确认），解析为 UTC 秒级时间戳。
+//     - status：根据 dsco_status 自动推导（created/shipment_pending/shipped/cancelled）。
 //     - mskus：提取行项目 partnerSku/sku，用于列表筛选与 CSV 导出。
 //     - warehouse_id：使用 requestedWarehouseCode（MVP 口径）。
 //     - shipment：使用 shippingServiceLevelCode（已确认），用于列表筛选与 CSV 导出。
@@ -41,13 +42,12 @@ func (d *Domain) PullDSCOOrders(ctx integration.TaskContext) error {
 	}
 
 	var (
-		since  time.Time
-		until  time.Time
-		status int16 = 1
+		since time.Time
+		until time.Time
 	)
 
 	if ctx.Trigger == integration.TriggerManual && ctx.Override != nil {
-		// 1.1) 手动触发：从 Override 中解析范围与入库状态
+		// 1.1) 手动触发：从 Override 中解析时间范围
 		ov, ok := ctx.Override.(integration.PullDSCOOrdersOverride)
 		if !ok {
 			if p, ok2 := ctx.Override.(*integration.PullDSCOOrdersOverride); ok2 && p != nil {
@@ -58,7 +58,6 @@ func (d *Domain) PullDSCOOrders(ctx integration.TaskContext) error {
 		if ok {
 			since = time.Unix(ov.Start, 0).UTC()
 			until = time.Unix(ov.End, 0).UTC()
-			status = ov.Status
 		}
 	}
 
@@ -133,15 +132,16 @@ func (d *Domain) PullDSCOOrders(ctx integration.TaskContext) error {
 				}
 			}
 
-			// 3.3) 入库行：只写入一期需要的字段，其它信息存入 payload
+			// 3.3) 入库状态：优先根据 DSCO dsco_status 推导；未知状态则默认 1
 			dscoStatus := strings.TrimSpace(order.DscoStatus)
-			rowStatus := status
+			rowStatus := int16(1)
 			if dscoStatus != "" {
-				// 约定：拉单入库时，根据 dsco_status 推导入库 status（见 dscoStatusToSyncStatus）。
 				if mapped, ok := dscoStatusToSyncStatus(dscoStatus); ok {
 					rowStatus = mapped
 				}
 			}
+
+			// 3.4) 入库行：只写入一期需要的字段，其它信息存入 payload
 			row := store.DSCOOrderSyncRow{
 				PONumber:       order.PoNumber,
 				DSCOCreateTime: createUnix,
