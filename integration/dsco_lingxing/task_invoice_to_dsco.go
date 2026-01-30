@@ -3,9 +3,8 @@ package dsco_lingxing
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"math"
-	"strconv"
-	"strings"
 	"time"
 
 	"example.com/lingxing/golib/v2/sdk/dsco"
@@ -38,35 +37,26 @@ func (d *Domain) InvoiceToDSCO(ctx integration.TaskContext) error {
 		return err
 	}
 
-	skuRev, err := buildReverseSKUMap(ctx.Config)
-	if err != nil {
-		return err
-	}
-
 	var invs []dsco.Invoice
-	var toUpdate []string
+	var toUpdate []struct {
+		po        string
+		invoiceID string
+	}
 
 	for _, row := range items {
 		po := row.PONumber
+		if row.DSCOInvoiceID != "" {
+			continue
+		}
 
 		var dscoOrder dsco.Order
 		if err := json.Unmarshal(row.Payload, &dscoOrder); err != nil {
 			continue
 		}
 
-		shipCode := getDSCOShippingServiceLevelCode(dscoOrder)
-		sidStr := ""
-		if shipCode != "" {
-			sidStr = ctx.Config.Mapping.Shipment[shipCode]
-		}
-		sidStr = strings.TrimSpace(sidStr)
-		if sidStr == "" {
-			logger.Warn(taskCtx, "missing mapping.shipment for dsco shippingServiceLevelCode", "po_number", po, "shipping_service_level_code", shipCode)
-			continue
-		}
-		sid, err := strconv.Atoi(sidStr)
-		if err != nil || sid <= 0 {
-			logger.Warn(taskCtx, "invalid mapping.shipment sid", "po_number", po, "shipping_service_level_code", shipCode, "sid", sidStr)
+		sid, ok := lingxingSIDFromMapping(ctx.Config, dscoOrder)
+		if !ok {
+			logger.Warn(taskCtx, "missing mapping.shop sid for wms order list", "po_number", po)
 			continue
 		}
 
@@ -82,6 +72,10 @@ func (d *Domain) InvoiceToDSCO(ctx integration.TaskContext) error {
 
 		shipDate := time.Now().UTC().Format(time.RFC3339)
 		if rawTime := wmsOrders[0].DeliveredAt; rawTime != "" {
+			if t, err := parseLingXingDateTimeToRFC3339UTC(rawTime); err == nil {
+				shipDate = t
+			}
+		} else if rawTime := wmsOrders[0].StockDeliveredAt; rawTime != "" {
 			if t, err := parseLingXingDateTimeToRFC3339UTC(rawTime); err == nil {
 				shipDate = t
 			}
@@ -118,10 +112,7 @@ func (d *Domain) InvoiceToDSCO(ctx integration.TaskContext) error {
 		var lineItems []dsco.InvoiceLineItem
 		var total float64
 		for _, p := range wmsOrders[0].ProductInfo {
-			dscoPartner := skuRev[p.SKU]
-			if dscoPartner == "" {
-				dscoPartner = p.SKU
-			}
+			dscoPartner := p.SKU
 			unit := priceByPartner[dscoPartner]
 			if unit <= 0 {
 				continue
@@ -150,6 +141,10 @@ func (d *Domain) InvoiceToDSCO(ctx integration.TaskContext) error {
 		total = math.Round(total*100) / 100
 
 		invoiceID := po
+		if len(wmsOrders) > 1 {
+			// Future-proof: when a PO has multiple WMS orders, use a stable 1-based sequence.
+			invoiceID = fmt.Sprintf("%s-%d", po, 1)
+		}
 		invs = append(invs, dsco.Invoice{
 			InvoiceID:           invoiceID,
 			PoNumber:            po,
@@ -160,7 +155,10 @@ func (d *Domain) InvoiceToDSCO(ctx integration.TaskContext) error {
 			TotalAmount:         total,
 			LineItems:           lineItems,
 		})
-		toUpdate = append(toUpdate, po)
+		toUpdate = append(toUpdate, struct {
+			po        string
+			invoiceID string
+		}{po: po, invoiceID: invoiceID})
 	}
 	if len(invs) == 0 {
 		return nil
@@ -169,8 +167,8 @@ func (d *Domain) InvoiceToDSCO(ctx integration.TaskContext) error {
 	if err != nil {
 		return err
 	}
-	for _, po := range toUpdate {
-		if err := d.orderStore.UpdateStatusAndFields(taskCtx, po, 5, "", po); err != nil {
+	for _, it := range toUpdate {
+		if err := d.orderStore.UpdateStatusAndFields(taskCtx, it.po, 5, "", it.invoiceID); err != nil {
 			logger.Warn(taskCtx, "update status after invoice failed", "err", err)
 		}
 	}

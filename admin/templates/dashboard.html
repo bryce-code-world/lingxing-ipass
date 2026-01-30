@@ -1,0 +1,52 @@
+{{ define "dashboard" }}
+  {{ template "layout_head" . }}
+  <h1 class="h1">Dashboard</h1>
+  <div class="grid">
+    <div class="card">
+      <div class="k">Domain</div>
+      <div class="v">{{ .Domain }}</div>
+    </div>
+    <div class="card">
+      <div class="k">Runtime Config</div>
+      <div class="v">updated_at={{ .UpdatedAt }}</div>
+    </div>
+    <div class="card">
+      <div class="k">Quick Actions</div>
+      <div class="row">
+        <button class="btn" onclick="adminRunAllJobs()">Run all jobs</button>
+        <button class="btn" onclick="adminReload()">Reload</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top: 16px;">
+    <div class="row">
+      <div class="k" style="margin-right: 8px;">Jobs</div>
+      <div class="muted">scheduled enable/cron/size from runtime_config</div>
+    </div>
+    <table class="table" id="jobsTable">
+      <thead>
+        <tr>
+          <th>job</th>
+          <th>enable</th>
+          <th>cron</th>
+          <th>size</th>
+          <th style="width: 160px;">action</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{ range $job, $cfg := .Jobs }}
+        <tr>
+          <td><code>{{ $job }}</code></td>
+          <td>{{ $cfg.Enable }}</td>
+          <td><code>{{ $cfg.Cron }}</code></td>
+          <td>{{ $cfg.Size }}</td>
+          <td><button class="btn" onclick="adminRunOneJob('{{ $job }}')">Run</button></td>
+        </tr>
+        {{ end }}
+      </tbody>
+    </table>
+    <div id="toast" class="toast" style="display:none;"></div>
+  </div>
+  {{ template "layout_foot" . }}
+{{ end }}

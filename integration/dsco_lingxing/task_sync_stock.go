@@ -26,11 +26,6 @@ func (d *Domain) SyncStock(ctx integration.TaskContext) error {
 		return err
 	}
 
-	skuRev, err := buildReverseSKUMap(ctx.Config)
-	if err != nil {
-		return err
-	}
-
 	// mapping.warehouse: DSCO warehouseCode -> LingXing WID
 	for dscoWarehouseCode, wid := range ctx.Config.Mapping.Warehouse {
 		if dscoWarehouseCode == "" || wid == "" {
@@ -54,10 +49,7 @@ func (d *Domain) SyncStock(ctx integration.TaskContext) error {
 
 			var invs []dsco.ItemInventory
 			for _, it := range items {
-				partner := skuRev[it.SKU]
-				if partner == "" {
-					partner = it.SKU
-				}
+				partner := it.SKU
 				qty := it.ProductValidNum
 				partnerCopy := partner
 				invs = append(invs, dsco.ItemInventory{

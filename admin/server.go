@@ -1,6 +1,8 @@
 package admin
 
 import (
+	"html/template"
+	"io/fs"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -29,6 +31,12 @@ func NewServer(env config.EnvConfig, cfgMgr *runtimecfg.Manager, reg *integratio
 	engine := gin.New()
 	engine.Use(gin.Recovery())
 
+	tpl := template.Must(template.New("admin").ParseFS(assets, "templates/*.html"))
+	engine.SetHTMLTemplate(tpl)
+	if sub, err := fs.Sub(assets, "static"); err == nil {
+		engine.StaticFS("/admin/static", http.FS(sub))
+	}
+
 	s := &Server{
 		env:            env,
 		cfgMgr:         cfgMgr,
@@ -53,6 +61,8 @@ func (s *Server) registerRoutes() {
 		c.Redirect(http.StatusFound, "/admin/dashboard")
 	})
 	admin.GET("/login", s.uiLogin)
+	admin.POST("/login", s.uiLoginPost)
+	admin.GET("/logout", s.requireAuth(), s.uiLogout)
 	admin.GET("/dashboard", s.requireAuth(), s.uiDashboard)
 	admin.GET("/config", s.requireAuth(), s.uiConfig)
 	admin.GET("/tasks", s.requireAuth(), s.uiTasks)

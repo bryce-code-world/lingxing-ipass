@@ -85,16 +85,21 @@ func Validate(cfg Config, supportedJobs map[JobName]struct{}) error {
 		if len(cfg.Mapping.Shop) == 0 {
 			return errors.New("启用 push_to_lingxing 前：mapping.shop 必须非空")
 		}
+		// If warehouse mapping exists, shipment mapping should exist as well because push may set wid.
+		// When wid is filled, lingxing CreateOrdersV2 requires logistics_type_id.
+		if len(cfg.Mapping.Warehouse) > 0 && len(cfg.Mapping.Shipment) == 0 {
+			return errors.New("启用 push_to_lingxing 且配置了 mapping.warehouse 时：mapping.shipment 必须非空（用于 logistics_type_id）")
+		}
 	}
-	// If ship/invoice jobs enabled, shipment mapping must be non-empty to map SID.
+	// If ship/invoice jobs enabled, shop mapping must be non-empty to obtain lingxing SID for WmsOrderList.
 	if jc, ok := cfg.Jobs[JobShipToDSCO]; ok && jc.Enable {
-		if len(cfg.Mapping.Shipment) == 0 {
-			return errors.New("启用 ship_to_dsco 前：mapping.shipment 必须非空")
+		if len(cfg.Mapping.Shop) == 0 {
+			return errors.New("启用 ship_to_dsco 前：mapping.shop 必须非空（用于 WmsOrderList.sid_arr）")
 		}
 	}
 	if jc, ok := cfg.Jobs[JobInvoiceToDSCO]; ok && jc.Enable {
-		if len(cfg.Mapping.Shipment) == 0 {
-			return errors.New("启用 invoice_to_dsco 前：mapping.shipment 必须非空")
+		if len(cfg.Mapping.Shop) == 0 {
+			return errors.New("启用 invoice_to_dsco 前：mapping.shop 必须非空（用于 WmsOrderList.sid_arr）")
 		}
 	}
 

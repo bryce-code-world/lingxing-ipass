@@ -1,0 +1,29 @@
+{{ define "layout_head" }}
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{ .Title }}</title>
+    <link rel="stylesheet" href="/admin/static/admin.css" />
+    <script defer src="/admin/static/admin.js"></script>
+  </head>
+  <body>
+    <div class="topbar">
+      <div class="brand">iPass Admin</div>
+      <div class="spacer"></div>
+      <a class="link" href="/admin/dashboard">Dashboard</a>
+      <a class="link" href="/admin/config">Config</a>
+      <a class="link" href="/admin/tasks">Tasks</a>
+      <a class="link" href="/admin/orders">Orders</a>
+      <a class="link" href="/admin/warehouses">Warehouses</a>
+      <a class="link" href="/admin/logout">Logout</a>
+    </div>
+    <div class="container">
+{{ end }}
+
+{{ define "layout_foot" }}
+    </div>
+  </body>
+</html>
+{{ end }}

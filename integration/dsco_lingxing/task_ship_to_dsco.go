@@ -3,7 +3,6 @@ package dsco_lingxing
 import (
 	"context"
 	"encoding/json"
-	"strconv"
 	"strings"
 
 	"example.com/lingxing/golib/v2/sdk/dsco"
@@ -36,34 +35,21 @@ func (d *Domain) ShipToDSCO(ctx integration.TaskContext) error {
 		return err
 	}
 
-	skuRev, err := buildReverseSKUMap(ctx.Config)
-	if err != nil {
-		return err
-	}
-
 	var batch []dsco.ShipmentsForUpdate
 	var toUpdate []string
 
 	for _, row := range items {
 		po := row.PONumber
+		if row.ShippedTrackingNo != "" {
+			continue
+		}
 		var dscoOrder dsco.Order
 		if err := json.Unmarshal(row.Payload, &dscoOrder); err != nil {
 			continue
 		}
-
-		shipCode := getDSCOShippingServiceLevelCode(dscoOrder)
-		sidStr := ""
-		if shipCode != "" {
-			sidStr = ctx.Config.Mapping.Shipment[shipCode]
-		}
-		sidStr = strings.TrimSpace(sidStr)
-		if sidStr == "" {
-			logger.Warn(taskCtx, "missing mapping.shipment for dsco shippingServiceLevelCode", "po_number", po, "shipping_service_level_code", shipCode)
-			continue
-		}
-		sid, err := strconv.Atoi(sidStr)
-		if err != nil || sid <= 0 {
-			logger.Warn(taskCtx, "invalid mapping.shipment sid", "po_number", po, "shipping_service_level_code", shipCode, "sid", sidStr)
+		sid, ok := lingxingSIDFromMapping(ctx.Config, dscoOrder)
+		if !ok {
+			logger.Warn(taskCtx, "missing mapping.shop sid for wms order list", "po_number", po)
 			continue
 		}
 
@@ -78,7 +64,7 @@ func (d *Domain) ShipToDSCO(ctx integration.TaskContext) error {
 
 		dscoShipMethod := getDSCOShipMethod(dscoOrder)
 		if dscoShipMethod == "" {
-			dscoShipMethod = shipCode
+			dscoShipMethod = getDSCOShippingServiceLevelCode(dscoOrder)
 		}
 
 		shipDateRFC3339 := ""
@@ -91,6 +77,10 @@ func (d *Domain) ShipToDSCO(ctx integration.TaskContext) error {
 		if err == nil && len(orders) > 0 {
 			rawTime := orders[0].DeliveredAt
 			if rawTime != "" {
+				if t, err := parseLingXingDateTimeToRFC3339UTC(rawTime); err == nil {
+					shipDateRFC3339 = t
+				}
+			} else if rawTime := orders[0].StockDeliveredAt; rawTime != "" {
 				if t, err := parseLingXingDateTimeToRFC3339UTC(rawTime); err == nil {
 					shipDateRFC3339 = t
 				}
@@ -119,10 +109,7 @@ func (d *Domain) ShipToDSCO(ctx integration.TaskContext) error {
 		})
 		if err == nil && len(wmsOrders) > 0 && len(wmsOrders[0].ProductInfo) > 0 {
 			for _, p := range wmsOrders[0].ProductInfo {
-				dscoPartner := skuRev[p.SKU]
-				if dscoPartner == "" {
-					dscoPartner = p.SKU
-				}
+				dscoPartner := p.SKU
 				li := dsco.ShipmentLineItemForUpdate{
 					Quantity:   p.Count,
 					PartnerSKU: dscoPartner,
@@ -135,10 +122,7 @@ func (d *Domain) ShipToDSCO(ctx integration.TaskContext) error {
 		} else {
 			// Fallback: order detail item quantities.
 			for _, it := range detail.ItemInfo {
-				dscoPartner := skuRev[it.MSKU]
-				if dscoPartner == "" {
-					dscoPartner = it.MSKU
-				}
+				dscoPartner := it.MSKU
 				li := dsco.ShipmentLineItemForUpdate{
 					Quantity:   it.Quantity,
 					PartnerSKU: dscoPartner,
@@ -174,7 +158,14 @@ func (d *Domain) ShipToDSCO(ctx integration.TaskContext) error {
 		return err
 	}
 	for _, po := range toUpdate {
-		if err := d.orderStore.UpdateStatusAndFields(taskCtx, po, 4, "", ""); err != nil {
+		// shipped_tracking_no: use tracking returned by lingxing order detail.
+		// For MVP: re-query detail to get tracking (avoid carrying extra state in toUpdate).
+		detail, derr := lx.Order.GetOrderDetailV2(taskCtx, lingxing.OrderDetailV2Request{PlatformOrderNo: po})
+		tracking := ""
+		if derr == nil {
+			tracking = strings.TrimSpace(detail.LogisticsInfo.TrackingNo)
+		}
+		if err := d.orderStore.UpdateStatusAndFields(taskCtx, po, 4, tracking, ""); err != nil {
 			logger.Warn(taskCtx, "update status after ship failed", "err", err)
 		}
 	}

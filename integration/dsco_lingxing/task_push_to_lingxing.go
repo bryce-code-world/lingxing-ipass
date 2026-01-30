@@ -61,6 +61,29 @@ func (d *Domain) PushToLingXing(ctx integration.TaskContext) error {
 			}
 		}
 
+		logisticsTypeID := ""
+		if wid != "" {
+			shipWarehouseCode := strings.TrimSpace(derefString(order.ShipWarehouseCode))
+			if shipWarehouseCode == "" {
+				shipWarehouseCode = strings.TrimSpace(derefString(order.RequestedWarehouseCode))
+			}
+			serviceLevelCode := strings.TrimSpace(getDSCOShippingServiceLevelCode(order))
+			key := shipWarehouseCode + "-" + serviceLevelCode
+			logisticsTypeID = strings.TrimSpace(ctx.Config.Mapping.Shipment[key])
+			if logisticsTypeID == "" {
+				logger.Warn(taskCtx, "missing mapping.shipment for logistics_type_id", "po_number", order.PoNumber, "key", key)
+				continue
+			}
+		}
+
+		// Idempotency: if order already exists in LingXing, just advance status and continue.
+		if _, err := lx.Order.GetOrderDetailV2(taskCtx, lingxing.OrderDetailV2Request{PlatformOrderNo: order.PoNumber}); err == nil {
+			if err := d.orderStore.UpdateStatusAndFields(taskCtx, order.PoNumber, 2, "", ""); err != nil {
+				logger.Warn(taskCtx, "update status failed", "err", err)
+			}
+			continue
+		}
+
 		addr := order.Shipping
 		if addr == nil {
 			logger.Warn(taskCtx, "missing shipping address", "po_number", order.PoNumber)
@@ -96,17 +119,13 @@ func (d *Domain) PushToLingXing(ctx integration.TaskContext) error {
 			if dscoPartner == "" {
 				continue
 			}
-			msku := dscoPartner
-			if v, ok := ctx.Config.Mapping.SKU[dscoPartner]; ok && v != "" {
-				msku = v
-			}
 			unitPrice, ok := pickUnitPrice(li)
 			if !ok {
 				logger.Warn(taskCtx, "unit price missing", "po_number", order.PoNumber, "sku", dscoPartner)
 				continue
 			}
 			createItems = append(createItems, lingxing.CreateOrderItemV2{
-				MSKU:      msku,
+				MSKU:      dscoPartner,
 				Quantity:  li.Quantity,
 				UnitPrice: unitPrice,
 			})
@@ -127,6 +146,7 @@ func (d *Domain) PushToLingXing(ctx integration.TaskContext) error {
 					City:                strings.TrimSpace(addr.City),
 					AddressLine1:        line1,
 					WID:                 wid,
+					LogisticsTypeID:     logisticsTypeID,
 					Items:               createItems,
 				},
 			},

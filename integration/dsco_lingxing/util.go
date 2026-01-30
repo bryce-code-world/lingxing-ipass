@@ -117,10 +117,33 @@ func getDSCOShippingServiceLevelCode(o dsco.Order) string {
 }
 
 func buildReverseSKUMap(cfg runtimecfg.Config) (map[string]string, error) {
-	// mapping.sku is DSCO -> 领星；回传侧需要 领星 -> DSCO，所以这里做严格反向。
-	lingSKUToDSCOPartner, err := reverseMapStrict(cfg.Mapping.SKU)
-	if err != nil {
-		return nil, err
+	// 一期（已确认）：推单到领星时 SKU 不做映射，直接把 DSCO SKU 赋值到领星 MSKU，由领星侧自动匹配。
+	// 因此 runtime_config.mapping.sku 暂不使用，保留字段仅为未来扩展位。
+	return map[string]string{}, nil
+}
+
+func shopKeyFromDSCOOrder(o dsco.Order) string {
+	if o.DscoRetailerID != nil && strings.TrimSpace(*o.DscoRetailerID) != "" {
+		return strings.TrimSpace(*o.DscoRetailerID)
 	}
-	return lingSKUToDSCOPartner, nil
+	if o.Channel != nil && strings.TrimSpace(*o.Channel) != "" {
+		return strings.TrimSpace(*o.Channel)
+	}
+	return ""
+}
+
+func lingxingSIDFromMapping(cfg runtimecfg.Config, o dsco.Order) (int, bool) {
+	key := shopKeyFromDSCOOrder(o)
+	if key == "" {
+		return 0, false
+	}
+	raw := strings.TrimSpace(cfg.Mapping.Shop[key])
+	if raw == "" {
+		return 0, false
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil || v <= 0 {
+		return 0, false
+	}
+	return v, true
 }

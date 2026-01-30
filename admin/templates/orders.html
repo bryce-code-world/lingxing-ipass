@@ -1,0 +1,50 @@
+{{ define "orders" }}
+  {{ template "layout_head" . }}
+  <h1 class="h1">DSCO Order Sync</h1>
+  <div class="card">
+    <div class="row wrap">
+      <input class="input" id="qPo" placeholder="po_number like" />
+      <input class="input" id="qDscoOrderId" placeholder="dsco_order_id" />
+      <input class="input" id="qConsumer" placeholder="consumer_order_number like" />
+      <input class="input" id="qChannel" placeholder="channel" />
+      <input class="input" id="qMSKU" placeholder="msku" />
+      <input class="input" id="qStatus" placeholder="status (e.g. 1,2,3)" />
+      <input class="input" id="qStart" placeholder="start (unix sec)" />
+      <input class="input" id="qEnd" placeholder="end (unix sec)" />
+      <button class="btn" onclick="adminLoadOrders(0)">Search</button>
+      <button class="btn" onclick="adminExportOrders()">Export CSV</button>
+    </div>
+    <div class="muted" style="margin-top: 8px;">时间为 UTC 秒级；end 为开区间。</div>
+  </div>
+
+  <div class="card" style="margin-top: 16px;">
+    <div class="row">
+      <div class="k">Results</div>
+      <div class="spacer"></div>
+      <div class="muted" id="ordersMeta"></div>
+    </div>
+    <table class="table" id="ordersTable">
+      <thead>
+        <tr>
+          <th>id</th>
+          <th>po_number</th>
+          <th>dsco_create_time</th>
+          <th>status</th>
+          <th>warehouse_id</th>
+          <th>shipment</th>
+          <th>tracking</th>
+          <th>invoice_id</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+    <div class="row" style="margin-top: 12px;">
+      <button class="btn" onclick="adminPrevOrders()">Prev</button>
+      <button class="btn" onclick="adminNextOrders()">Next</button>
+      <div class="spacer"></div>
+      <div class="muted" id="ordersPage"></div>
+    </div>
+    <div id="toast" class="toast" style="display:none;"></div>
+  </div>
+  {{ template "layout_foot" . }}
+{{ end }}

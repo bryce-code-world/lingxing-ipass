@@ -1,0 +1,34 @@
+{{ define "tasks" }}
+  {{ template "layout_head" . }}
+  <h1 class="h1">Tasks</h1>
+  <div class="card">
+    <div class="row">
+      <button class="btn primary" onclick="adminRunAllJobs()">Run all jobs</button>
+      <div class="muted">同一任务不允许并发（运行中会返回 409）。</div>
+    </div>
+    <div style="height: 10px;"></div>
+
+    <div class="grid2">
+      <div class="card subtle">
+        <div class="k">Manual Pull DSCO Orders</div>
+        <div class="muted">UTC 秒级时间戳；范围边界 [start,end)。状态 1~5。</div>
+        <div class="row">
+          <input class="input" id="pullStart" placeholder="start (unix sec)" />
+          <input class="input" id="pullEnd" placeholder="end (unix sec)" />
+          <input class="input" id="pullStatus" placeholder="status (1~5)" value="1" />
+          <button class="btn" onclick="adminManualPull()">Pull</button>
+        </div>
+      </div>
+      <div class="card subtle">
+        <div class="k">One Job</div>
+        <div class="row">
+          <input class="input" id="oneJob" placeholder="job name (e.g. pull_dsco_orders)" />
+          <button class="btn" onclick="adminRunOneJobFromInput()">Run</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="toast" class="toast" style="display:none;"></div>
+  </div>
+  {{ template "layout_foot" . }}
+{{ end }}

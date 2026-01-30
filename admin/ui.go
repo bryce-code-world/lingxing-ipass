@@ -1,37 +1,77 @@
 package admin
 
 import (
+	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
+
+	"lingxingipass/infra/runtimecfg"
 )
 
 func (s *Server) uiLogin(c *gin.Context) {
-	c.Header("Content-Type", "text/html; charset=utf-8")
-	c.String(http.StatusOK, `<!doctype html>
-<html><head><meta charset="utf-8"><title>Admin Login</title></head>
-<body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial; margin:40px;">
-<h1>Admin Login</h1>
-<form method="post" action="/admin/api/auth/login">
-  <input type="password" name="password" placeholder="Password" style="padding:10px; width:260px;" />
-  <button type="submit" style="padding:10px 16px;">Login</button>
-</form>
-</body></html>`)
+	c.HTML(http.StatusOK, "login", gin.H{
+		"Error": "",
+	})
 }
 
-func (s *Server) uiDashboard(c *gin.Context)  { s.simplePage(c, "Dashboard") }
-func (s *Server) uiConfig(c *gin.Context)     { s.simplePage(c, "Config") }
-func (s *Server) uiTasks(c *gin.Context)      { s.simplePage(c, "Tasks") }
-func (s *Server) uiOrders(c *gin.Context)     { s.simplePage(c, "Orders") }
-func (s *Server) uiWarehouses(c *gin.Context) { s.simplePage(c, "Warehouses") }
+func (s *Server) uiLoginPost(c *gin.Context) {
+	pass := strings.TrimSpace(c.PostForm("password"))
+	if pass == "" || pass != s.env.Admin.Password {
+		c.HTML(http.StatusUnauthorized, "login", gin.H{
+			"Error": "invalid password",
+		})
+		return
+	}
+	s.setSession(c)
+	c.Redirect(http.StatusFound, "/admin/dashboard")
+}
 
-func (s *Server) simplePage(c *gin.Context, title string) {
-	c.Header("Content-Type", "text/html; charset=utf-8")
-	c.String(http.StatusOK, `<!doctype html>
-<html><head><meta charset="utf-8"><title>`+title+`</title></head>
-<body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial; margin:40px;">
-<h1>`+title+`</h1>
-<p>API-first MVP. Use <code>/admin/api/*</code>.</p>
-<p><a href="/admin/dashboard">Dashboard</a> | <a href="/admin/config">Config</a> | <a href="/admin/tasks">Tasks</a> | <a href="/admin/orders">Orders</a> | <a href="/admin/warehouses">Warehouses</a></p>
-</body></html>`)
+func (s *Server) uiLogout(c *gin.Context) {
+	s.clearSession(c)
+	c.Redirect(http.StatusFound, "/admin/login")
+}
+
+func (s *Server) uiDashboard(c *gin.Context) {
+	rc, _ := s.cfgMgr.Snapshot(runtimecfg.DomainDSCOLingXing)
+	c.HTML(http.StatusOK, "dashboard", gin.H{
+		"Title":     "Dashboard",
+		"Domain":    runtimecfg.DomainDSCOLingXing,
+		"UpdatedAt": rc.UpdatedAt,
+		"Jobs":      rc.Config.Jobs,
+	})
+}
+
+func (s *Server) uiConfig(c *gin.Context) {
+	rc, ok := s.cfgMgr.Snapshot(runtimecfg.DomainDSCOLingXing)
+	var cfgJSON string
+	if ok {
+		if b, err := json.MarshalIndent(rc.Config, "", "  "); err == nil {
+			cfgJSON = string(b)
+		}
+	}
+	c.HTML(http.StatusOK, "config", gin.H{
+		"Title":      "Runtime Config",
+		"Domain":     runtimecfg.DomainDSCOLingXing,
+		"ConfigJSON": cfgJSON,
+	})
+}
+
+func (s *Server) uiTasks(c *gin.Context) {
+	c.HTML(http.StatusOK, "tasks", gin.H{
+		"Title": "Tasks",
+	})
+}
+
+func (s *Server) uiOrders(c *gin.Context) {
+	c.HTML(http.StatusOK, "orders", gin.H{
+		"Title": "Orders",
+	})
+}
+
+func (s *Server) uiWarehouses(c *gin.Context) {
+	c.HTML(http.StatusOK, "warehouses", gin.H{
+		"Title": "Warehouses",
+	})
 }
