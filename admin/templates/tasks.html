@@ -1,33 +1,37 @@
 {{ define "tasks" }}
   {{ template "layout_head" . }}
   <h1 class="h1">Tasks</h1>
-  <div class="card">
-    <div class="row">
-      <button class="btn primary" onclick="adminRunAllJobs()">Run all jobs</button>
-      <div class="muted">同一任务不允许并发（运行中会返回 409）。</div>
-    </div>
-    <div style="height: 10px;"></div>
 
-    <div class="grid2">
-      <div class="card subtle">
-        <div class="k">Manual Pull DSCO Orders</div>
-        <div class="muted">时间按 <code id="tzLabel"></code> 解释；范围边界 [start,end)。状态 1~5。</div>
-        <div class="row">
-          <input class="input" id="pullStartDT" type="datetime-local" />
-          <input class="input" id="pullEndDT" type="datetime-local" />
-          <input class="input" id="pullStatus" placeholder="status (1~5)" value="1" />
-          <button class="btn" onclick="adminManualPull()">Pull</button>
-        </div>
-      </div>
-      <div class="card subtle">
-        <div class="k">One Job</div>
-        <div class="row">
-          <input class="input" id="oneJob" placeholder="job name (e.g. pull_dsco_orders)" />
-          <button class="btn" onclick="adminRunOneJobFromInput()">Run</button>
-        </div>
+  <div class="grid2">
+    <div class="card">
+      <div class="k">Quick Actions</div>
+      <div class="muted" style="margin-top: 6px;">同一任务不允许并发（运行中会返回 409）。</div>
+      <div class="row" style="margin-top: 12px;">
+        <button class="btn primary" onclick="adminRunAllJobs()">Run all jobs</button>
       </div>
     </div>
 
+    <div class="card">
+      <div class="k">Run One Job</div>
+      <div class="muted" style="margin-top: 6px;">输入 job 名称并手动触发执行。</div>
+      <div class="row wrap filters" style="margin-top: 12px;">
+        <input class="input sm" id="oneJob" placeholder="job name (e.g. pull_dsco_orders)" />
+        <button class="btn" onclick="adminRunOneJobFromInput()">Run</button>
+      </div>
+    </div>
   </div>
+
+  <div class="card" style="margin-top: 16px;">
+    <div class="k">Manual Pull DSCO Orders</div>
+    <div class="muted" style="margin-top: 6px;">时间按 <code id="tzLabel"></code> 解释；范围边界 [start,end)；状态 1~5。</div>
+    <div class="row wrap filters" style="margin-top: 12px;">
+      <input class="input sm" id="pullStartDT" type="datetime-local" />
+      <input class="input sm" id="pullEndDT" type="datetime-local" />
+      <input class="input sm" id="pullStatus" placeholder="status (1~5)" value="1" />
+      <button class="btn" onclick="adminManualPull()">Pull</button>
+    </div>
+  </div>
+
   {{ template "layout_foot" . }}
 {{ end }}
+
