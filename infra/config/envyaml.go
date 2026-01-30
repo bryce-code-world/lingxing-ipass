@@ -3,6 +3,9 @@ package config
 import (
 	"errors"
 	"os"
+	"strconv"
+	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -25,6 +28,7 @@ func applyDefaults(cfg *EnvConfig) {
 	if cfg.Admin.DisplayTimezone == "" {
 		cfg.Admin.DisplayTimezone = "UTC"
 	}
+	cfg.Admin.DisplayTimezone = normalizeDisplayTimezone(cfg.Admin.DisplayTimezone)
 }
 
 func applyEnvOverride(cfg *EnvConfig) {
@@ -65,6 +69,21 @@ func applyEnvOverride(cfg *EnvConfig) {
 	}
 }
 
+func normalizeDisplayTimezone(s string) string {
+	v := strings.TrimSpace(s)
+	if v == "" {
+		return "UTC"
+	}
+	// Handle values mistakenly wrapped as a quoted string, e.g. "\"UTC\"" or "'UTC'".
+	if unq, err := strconv.Unquote(v); err == nil {
+		v = strings.TrimSpace(unq)
+	}
+	if v == "" {
+		return "UTC"
+	}
+	return v
+}
+
 func ValidateEnv(cfg EnvConfig) error {
 	if cfg.Base.ListenAddr == "" {
 		return errors.New("base.listen_addr 不能为空")
@@ -78,6 +97,9 @@ func ValidateEnv(cfg EnvConfig) error {
 		return errors.New("admin.password 不能为空")
 	}
 	// display_timezone default is applied in LoadEnvYAML.
+	if _, err := time.LoadLocation(normalizeDisplayTimezone(cfg.Admin.DisplayTimezone)); err != nil {
+		return errors.New("admin.display_timezone invalid (IANA timezone like UTC/Asia/Shanghai)")
+	}
 	if cfg.Admin.Export.Dir == "" {
 		return errors.New("admin.export.dir 不能为空")
 	}

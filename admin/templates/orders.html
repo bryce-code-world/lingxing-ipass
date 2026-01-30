@@ -9,12 +9,12 @@
       <input class="input" id="qChannel" placeholder="channel" />
       <input class="input" id="qMSKU" placeholder="msku" />
       <input class="input" id="qStatus" placeholder="status (e.g. 1,2,3)" />
-      <input class="input" id="qStart" placeholder="start (unix sec)" />
-      <input class="input" id="qEnd" placeholder="end (unix sec)" />
+      <input class="input" id="qStartDT" type="datetime-local" />
+      <input class="input" id="qEndDT" type="datetime-local" />
       <button class="btn" onclick="adminLoadOrders(0)">Search</button>
       <button class="btn" onclick="adminExportOrders()">Export CSV</button>
     </div>
-    <div class="muted" style="margin-top: 8px;">时间为 UTC 秒级；end 为开区间。</div>
+    <div class="muted" style="margin-top: 8px;">时间按 <code id="tzLabel"></code> 展示；筛选输入按该时区解释；end 为开区间。</div>
   </div>
 
   <div class="card" style="margin-top: 16px;">

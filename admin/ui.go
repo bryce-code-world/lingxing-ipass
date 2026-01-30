@@ -36,10 +36,11 @@ func (s *Server) uiLogout(c *gin.Context) {
 func (s *Server) uiDashboard(c *gin.Context) {
 	rc, _ := s.cfgMgr.Snapshot(runtimecfg.DomainDSCOLingXing)
 	c.HTML(http.StatusOK, "dashboard", gin.H{
-		"Title":     "Dashboard",
-		"Domain":    runtimecfg.DomainDSCOLingXing,
-		"UpdatedAt": rc.UpdatedAt,
-		"Jobs":      rc.Config.Jobs,
+		"Title":           "Dashboard",
+		"DisplayTimezone": s.env.Admin.DisplayTimezone,
+		"Domain":          runtimecfg.DomainDSCOLingXing,
+		"UpdatedAt":       rc.UpdatedAt,
+		"Jobs":            rc.Config.Jobs,
 	})
 }
 
@@ -52,26 +53,30 @@ func (s *Server) uiConfig(c *gin.Context) {
 		}
 	}
 	c.HTML(http.StatusOK, "config", gin.H{
-		"Title":      "Runtime Config",
-		"Domain":     runtimecfg.DomainDSCOLingXing,
-		"ConfigJSON": cfgJSON,
+		"Title":           "Runtime Config",
+		"DisplayTimezone": s.env.Admin.DisplayTimezone,
+		"Domain":          runtimecfg.DomainDSCOLingXing,
+		"ConfigJSON":      cfgJSON,
 	})
 }
 
 func (s *Server) uiTasks(c *gin.Context) {
 	c.HTML(http.StatusOK, "tasks", gin.H{
-		"Title": "Tasks",
+		"Title":           "Tasks",
+		"DisplayTimezone": s.env.Admin.DisplayTimezone,
 	})
 }
 
 func (s *Server) uiOrders(c *gin.Context) {
 	c.HTML(http.StatusOK, "orders", gin.H{
-		"Title": "Orders",
+		"Title":           "Orders",
+		"DisplayTimezone": s.env.Admin.DisplayTimezone,
 	})
 }
 
 func (s *Server) uiWarehouses(c *gin.Context) {
 	c.HTML(http.StatusOK, "warehouses", gin.H{
-		"Title": "Warehouses",
+		"Title":           "Warehouses",
+		"DisplayTimezone": s.env.Admin.DisplayTimezone,
 	})
 }

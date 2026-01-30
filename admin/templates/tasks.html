@@ -11,10 +11,10 @@
     <div class="grid2">
       <div class="card subtle">
         <div class="k">Manual Pull DSCO Orders</div>
-        <div class="muted">UTC 秒级时间戳；范围边界 [start,end)。状态 1~5。</div>
+        <div class="muted">时间按 <code id="tzLabel"></code> 解释；范围边界 [start,end)。状态 1~5。</div>
         <div class="row">
-          <input class="input" id="pullStart" placeholder="start (unix sec)" />
-          <input class="input" id="pullEnd" placeholder="end (unix sec)" />
+          <input class="input" id="pullStartDT" type="datetime-local" />
+          <input class="input" id="pullEndDT" type="datetime-local" />
           <input class="input" id="pullStatus" placeholder="status (1~5)" value="1" />
           <button class="btn" onclick="adminManualPull()">Pull</button>
         </div>

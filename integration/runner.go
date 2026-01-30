@@ -54,10 +54,7 @@ func (r *Runner) Run(ctx context.Context, req RunRequest) error {
 	if !jobCfg.Enable && req.Trigger == TriggerScheduled {
 		return ErrJobDisabled
 	}
-	// For manual trigger: keep simple and only allow enabled jobs by default.
-	if !jobCfg.Enable && req.Trigger == TriggerManual {
-		return ErrJobDisabled
-	}
+	// Manual trigger is allowed even when the job is disabled for scheduler.
 	size := req.Size
 	if size <= 0 {
 		size = jobCfg.Size

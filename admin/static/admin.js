@@ -9,6 +9,123 @@ function showToast(msg) {
   window.__toastTimer = setTimeout(() => { el.style.display = "none"; }, 3500);
 }
 
+function normalizeTZ(raw) {
+  let s = (raw || "").trim();
+  if (!s) return "UTC";
+  if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
+    s = s.slice(1, -1).trim();
+  }
+  return s || "UTC";
+}
+
+const ADMIN_TZ_RAW = (typeof window !== "undefined" && window.ADMIN_TZ) ? window.ADMIN_TZ : "UTC";
+let ADMIN_TZ = normalizeTZ(ADMIN_TZ_RAW);
+
+function setTZLabel() {
+  const el = qs("tzLabel");
+  if (el) el.textContent = ADMIN_TZ || "UTC";
+}
+
+function fmtUnixSec(sec) {
+  const n = Number(sec);
+  if (!Number.isFinite(n) || n <= 0) return "";
+  const d = new Date(n * 1000);
+  let dtf;
+  try {
+    dtf = new Intl.DateTimeFormat("sv-SE", {
+      timeZone: ADMIN_TZ,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+    });
+  } catch (e) {
+    ADMIN_TZ = "UTC";
+    dtf = new Intl.DateTimeFormat("sv-SE", {
+      timeZone: "UTC",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+    });
+  }
+  return dtf.format(d).replace(" ", "T");
+}
+
+function getZonedPartsFromUTC(ms, tz) {
+  const d = new Date(ms);
+  let dtf;
+  try {
+    dtf = new Intl.DateTimeFormat("en-CA", {
+      timeZone: tz,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+    });
+  } catch (e) {
+    dtf = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "UTC",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+    });
+  }
+  const parts = dtf.formatToParts(d);
+  const out = {};
+  for (const p of parts) {
+    if (p.type === "year") out.year = parseInt(p.value, 10);
+    if (p.type === "month") out.month = parseInt(p.value, 10);
+    if (p.type === "day") out.day = parseInt(p.value, 10);
+    if (p.type === "hour") out.hour = parseInt(p.value, 10);
+    if (p.type === "minute") out.minute = parseInt(p.value, 10);
+    if (p.type === "second") out.second = parseInt(p.value, 10);
+  }
+  return out;
+}
+
+function parseDateTimeLocal(v) {
+  const s = (v || "").trim();
+  if (!s) return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(s);
+  if (!m) return null;
+  return {
+    year: parseInt(m[1], 10),
+    month: parseInt(m[2], 10),
+    day: parseInt(m[3], 10),
+    hour: parseInt(m[4], 10),
+    minute: parseInt(m[5], 10),
+    second: m[6] ? parseInt(m[6], 10) : 0,
+  };
+}
+
+function zonedDateTimeToUnixSec(parts, tz) {
+  // Iteratively converge: find the UTC instant whose wall-clock in tz equals parts.
+  let guess = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second);
+  for (let i = 0; i < 3; i++) {
+    const got = getZonedPartsFromUTC(guess, tz);
+    const desiredUTC = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second);
+    const gotUTC = Date.UTC(got.year, got.month - 1, got.day, got.hour, got.minute, got.second);
+    const diff = desiredUTC - gotUTC;
+    if (diff === 0) break;
+    guess += diff;
+  }
+  return Math.floor(guess / 1000);
+}
+
 async function apiJSON(method, url, body) {
   const opts = { method, headers: { "Content-Type": "application/json" } };
   if (body !== undefined) opts.body = JSON.stringify(body);
@@ -40,6 +157,14 @@ async function apiDownload(url, body, filenameHint) {
 
 function adminReload() { location.reload(); }
 
+function renderTimestamps() {
+  for (const el of document.querySelectorAll(".ts[data-ts]")) {
+    const raw = el.getAttribute("data-ts");
+    el.textContent = fmtUnixSec(raw);
+    el.title = raw || "";
+  }
+}
+
 async function adminRunAllJobs() {
   try {
     await apiJSON("POST", "/admin/api/jobs/run", {});
@@ -66,8 +191,10 @@ async function adminRunOneJobFromInput() {
 
 async function adminManualPull() {
   try {
-    const start = parseInt((qs("pullStart")?.value || "").trim(), 10);
-    const end = parseInt((qs("pullEnd")?.value || "").trim(), 10);
+    const startP = parseDateTimeLocal(qs("pullStartDT")?.value || "");
+    const endP = parseDateTimeLocal(qs("pullEndDT")?.value || "");
+    const start = startP ? zonedDateTimeToUnixSec(startP, ADMIN_TZ) : 0;
+    const end = endP ? zonedDateTimeToUnixSec(endP, ADMIN_TZ) : 0;
     const status = parseInt((qs("pullStatus")?.value || "").trim(), 10);
     await apiJSON("POST", "/admin/api/dsco_order_sync/pull", { start, end, status });
     showToast("Manual pull: OK");
@@ -114,8 +241,10 @@ function ordersFilter() {
   set("channel", (qs("qChannel")?.value || "").trim());
   set("msku", (qs("qMSKU")?.value || "").trim());
   set("status", (qs("qStatus")?.value || "").trim());
-  set("start", (qs("qStart")?.value || "").trim());
-  set("end", (qs("qEnd")?.value || "").trim());
+  const s = parseDateTimeLocal(qs("qStartDT")?.value || "");
+  const e = parseDateTimeLocal(qs("qEndDT")?.value || "");
+  if (s) set("start", String(zonedDateTimeToUnixSec(s, ADMIN_TZ)));
+  if (e) set("end", String(zonedDateTimeToUnixSec(e, ADMIN_TZ)));
   return f;
 }
 
@@ -132,7 +261,7 @@ async function adminLoadOrders(offset) {
     tbody.innerHTML = "";
     for (const it of (data.items || [])) {
       const tr = document.createElement("tr");
-      tr.innerHTML = `<td>${it.id}</td><td><code>${it.po_number}</code></td><td>${it.dsco_create_time}</td><td>${it.status}</td><td>${it.warehouse_id}</td><td>${it.shipment}</td><td>${it.shipped_tracking_no}</td><td>${it.dsco_invoice_id}</td>`;
+      tr.innerHTML = `<td>${it.id}</td><td><code>${it.po_number}</code></td><td title="${it.dsco_create_time}">${fmtUnixSec(it.dsco_create_time)}</td><td>${it.status}</td><td>${it.warehouse_id}</td><td>${it.shipment}</td><td>${it.shipped_tracking_no}</td><td>${it.dsco_invoice_id}</td>`;
       tbody.appendChild(tr);
     }
     showToast("Orders: OK");
@@ -176,8 +305,10 @@ function whFilter() {
   set("lingxing_warehouse_id", (qs("wLxWh")?.value || "").trim());
   set("lingxing_warehouse_sku", (qs("wLxSku")?.value || "").trim());
   set("status", (qs("wStatus")?.value || "").trim());
-  set("start", (qs("wStart")?.value || "").trim());
-  set("end", (qs("wEnd")?.value || "").trim());
+  const s = parseDateTimeLocal(qs("wStartDT")?.value || "");
+  const e = parseDateTimeLocal(qs("wEndDT")?.value || "");
+  if (s) set("start", String(zonedDateTimeToUnixSec(s, ADMIN_TZ)));
+  if (e) set("end", String(zonedDateTimeToUnixSec(e, ADMIN_TZ)));
   return f;
 }
 
@@ -194,7 +325,7 @@ async function adminLoadWarehouses(offset) {
     tbody.innerHTML = "";
     for (const it of (data.items || [])) {
       const tr = document.createElement("tr");
-      tr.innerHTML = `<td>${it.id}</td><td>${it.sync_time}</td><td>${it.dsco_warehouse_id}</td><td>${it.dsco_warehouse_sku}</td><td>${it.dsco_warehouse_num}</td><td>${it.lingxing_warehouse_id}</td><td>${it.lingxing_warehouse_sku}</td><td>${it.lingxing_warehouse_num}</td><td>${it.status}</td><td>${it.reason}</td>`;
+      tr.innerHTML = `<td>${it.id}</td><td title="${it.sync_time}">${fmtUnixSec(it.sync_time)}</td><td>${it.dsco_warehouse_id}</td><td>${it.dsco_warehouse_sku}</td><td>${it.dsco_warehouse_num}</td><td>${it.lingxing_warehouse_id}</td><td>${it.lingxing_warehouse_sku}</td><td>${it.lingxing_warehouse_num}</td><td>${it.status}</td><td>${it.reason}</td>`;
       tbody.appendChild(tr);
     }
     showToast("Warehouses: OK");
@@ -224,3 +355,7 @@ async function adminExportWarehouses() {
   }
 }
 
+document.addEventListener("DOMContentLoaded", () => {
+  setTZLabel();
+  renderTimestamps();
+});

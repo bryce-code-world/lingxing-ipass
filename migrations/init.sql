@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS dsco_order_sync (
   mskus                 text[]   NOT NULL DEFAULT '{}'::text[],
   warehouse_id          text     NOT NULL DEFAULT '',
   shipment              text     NOT NULL DEFAULT '',
+  dsco_retainer_id      text     NOT NULL DEFAULT '',
 
   shipped_tracking_no   text     NOT NULL DEFAULT '',
   dsco_invoice_id       text     NOT NULL DEFAULT '',
@@ -79,6 +80,7 @@ COMMENT ON COLUMN dsco_order_sync.payload IS 'DSCO 原始订单 JSON（覆盖更
 COMMENT ON COLUMN dsco_order_sync.mskus IS '订单 SKU 列表（用于筛选/导出）';
 COMMENT ON COLUMN dsco_order_sync.warehouse_id IS 'DSCO 仓库编码（warehouseCode；用于 mapping.warehouse 与筛选/导出）';
 COMMENT ON COLUMN dsco_order_sync.shipment IS 'DSCO 物流方式编码（shipMethod；用于 mapping.shipment 与筛选/导出）';
+COMMENT ON COLUMN dsco_order_sync.dsco_retainer_id IS '订单关联的 dsco 标记销售渠道 ID 信息';
 COMMENT ON COLUMN dsco_order_sync.shipped_tracking_no IS '已回传的物流运单号（trackingNumber；用于筛选/导出）';
 COMMENT ON COLUMN dsco_order_sync.dsco_invoice_id IS '已回传的发票 ID（invoiceId；用于筛选/导出）';
 COMMENT ON COLUMN dsco_order_sync.created_at IS '创建时间（UTC 秒级时间戳）';
