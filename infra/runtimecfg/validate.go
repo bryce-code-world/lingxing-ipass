@@ -12,13 +12,13 @@ func DefaultConfig(domain string) Config {
 	return Config{
 		Domain: domain,
 		Jobs: map[JobName]JobConfig{
-			JobPullDSCOOrders: {Enable: false, Cron: "0 */15 * * * *", Size: 200},
-			JobPushToLingXing: {Enable: false, Cron: "0 */15 * * * *", Size: 50},
-			JobAckToDSCO:      {Enable: false, Cron: "0 */15 * * * *", Size: 100},
-			JobShipToDSCO:     {Enable: false, Cron: "0 */15 * * * *", Size: 50},
-			JobInvoiceToDSCO:  {Enable: false, Cron: "0 */15 * * * *", Size: 50},
-			JobSyncStock:      {Enable: false, Cron: "0 0 0 * * *", Size: 50},
-			JobCleanupExports: {Enable: true, Cron: "0 0 */1 * * *", Size: 1},
+			JobCleanupExports: {Enable: true, Cron: "0 0 1 * * *", Size: 1},
+			JobPullDSCOOrders: {Enable: false, Cron: "0 5 * * * *", Size: 50},
+			JobPushToLingXing: {Enable: false, Cron: "0 10 * * * *", Size: 50},
+			JobAckToDSCO:      {Enable: false, Cron: "0 15 * * * *", Size: 50},
+			JobShipToDSCO:     {Enable: false, Cron: "0 20 * * * *", Size: 50},
+			JobInvoiceToDSCO:  {Enable: false, Cron: "0 25 * * * *", Size: 50},
+			JobSyncStock:      {Enable: false, Cron: "0 30 1 * * *", Size: 50},
 		},
 		Mapping: Mapping{
 			// 初始默认值：用于快速跑通闭环（可在 Admin 后台随时修改并热更新）。
@@ -26,14 +26,14 @@ func DefaultConfig(domain string) Config {
 				"1000011436": "110658143132021760",
 			},
 			Warehouse: map[string]string{
-				"YQN-CA2": "28393",
 				"YQN-CA":  "33328",
+				"YQN-CA2": "28393",
 			},
 			SKU: map[string]string{},
 			Shipment: map[string]string{
+				"YQN-CA-FEHD":  "203662740883276800",
 				"YQN-CA2-FEHD": "203656345743220736",
 				"YQN-CA2-USCG": "203656345742652928",
-				"YQN-CA-FEHD":  "203662740883276800",
 			},
 		},
 	}
