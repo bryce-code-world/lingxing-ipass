@@ -107,22 +107,22 @@ func (d *Domain) PushToLingXing(ctx integration.TaskContext) error {
 
 		createItems := make([]lingxing.CreateOrderItemV2, 0, len(order.LineItems))
 		for _, li := range order.LineItems {
-			dscoPartner := ""
-			if li.PartnerSKU != nil && *li.PartnerSKU != "" {
-				dscoPartner = *li.PartnerSKU
-			} else if li.SKU != nil && *li.SKU != "" {
-				dscoPartner = *li.SKU
+			msku := ""
+			if li.SKU != nil && *li.SKU != "" {
+				msku = *li.SKU
+			} else if li.PartnerSKU != nil && *li.PartnerSKU != "" {
+				msku = *li.PartnerSKU
 			}
-			if dscoPartner == "" {
+			if msku == "" {
 				continue
 			}
 			unitPrice, ok := pickUnitPrice(li)
 			if !ok {
-				logger.Warn(taskCtx, "unit price missing", "po_number", order.PoNumber, "sku", dscoPartner)
+				logger.Warn(taskCtx, "unit price missing", "po_number", order.PoNumber, "sku", msku)
 				continue
 			}
 			createItems = append(createItems, lingxing.CreateOrderItemV2{
-				MSKU:      dscoPartner,
+				MSKU:      msku,
 				Quantity:  li.Quantity,
 				UnitPrice: unitPrice,
 			})
@@ -144,6 +144,7 @@ func (d *Domain) PushToLingXing(ctx integration.TaskContext) error {
 					AddressLine1:        line1,
 					WID:                 wid,
 					LogisticsTypeID:     logisticsTypeID,
+					AmountCurrency:      "USD", // DSCO 用户都是美国用户，币种为固定值
 					Items:               createItems,
 				},
 			},
