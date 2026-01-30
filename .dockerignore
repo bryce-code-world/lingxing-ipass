@@ -1,0 +1,6 @@
+golibv2
+.git
+logs
+exports
+*.log
+*.tmp
