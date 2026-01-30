@@ -17,6 +17,20 @@ func NewDSCOOrderSyncStore(db *gorm.DB) *DSCOOrderSyncStore {
 	return &DSCOOrderSyncStore{db: db}
 }
 
+func toPGTextArrayLiteral(items []string) string {
+	if len(items) == 0 {
+		return "{}"
+	}
+	parts := make([]string, 0, len(items))
+	for _, it := range items {
+		s := strings.TrimSpace(it)
+		s = strings.ReplaceAll(s, `\`, `\\`)
+		s = strings.ReplaceAll(s, `"`, `\"`)
+		parts = append(parts, `"`+s+`"`)
+	}
+	return "{" + strings.Join(parts, ",") + "}"
+}
+
 type DSCOOrderSyncListFilter struct {
 	StartTime      *int64
 	EndTime        *int64
@@ -44,7 +58,7 @@ func (s *DSCOOrderSyncStore) Upsert(ctx context.Context, row DSCOOrderSyncRow) e
 		`INSERT INTO dsco_order_sync
 		    (po_number, dsco_create_time, dsco_retailer_id, status, payload, mskus, warehouse_id, shipment, shipped_tracking_no, dsco_invoice_id, created_at, updated_at)
 		 VALUES
-		    (?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?)
+		    (?, ?, ?, ?, ?::jsonb, ?::text[], ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT (po_number) DO UPDATE SET
 		    dsco_create_time=EXCLUDED.dsco_create_time,
 		    dsco_retailer_id=EXCLUDED.dsco_retailer_id,
@@ -56,7 +70,7 @@ func (s *DSCOOrderSyncStore) Upsert(ctx context.Context, row DSCOOrderSyncRow) e
 		    shipped_tracking_no=EXCLUDED.shipped_tracking_no,
 		    dsco_invoice_id=EXCLUDED.dsco_invoice_id,
 		    updated_at=EXCLUDED.updated_at`,
-		row.PONumber, row.DSCOCreateTime, row.DSCOREtailerID, row.Status, string(row.Payload), row.MSKUs,
+		row.PONumber, row.DSCOCreateTime, row.DSCOREtailerID, row.Status, string(row.Payload), toPGTextArrayLiteral(row.MSKUs),
 		row.WarehouseID, row.Shipment, row.ShippedTrackingNo, row.DSCOInvoiceID,
 		row.CreatedAt, row.UpdatedAt,
 	).Error
