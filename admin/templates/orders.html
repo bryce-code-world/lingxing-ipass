@@ -2,17 +2,23 @@
   {{ template "layout_head" . }}
   <h1 class="h1">DSCO Order Sync</h1>
   <div class="card">
-    <div class="row wrap">
-      <input class="input" id="qPo" placeholder="po_number like" />
-      <input class="input" id="qRetailer" placeholder="dsco_retailer_id" />
-      <input class="input" id="qMSKU" placeholder="msku" />
-      <input class="input" id="qStatus" placeholder="status (e.g. 1,2,3)" />
-      <input class="input" id="qStartDT" type="datetime-local" />
-      <input class="input" id="qEndDT" type="datetime-local" />
+    <div class="row wrap filters">
+      <input class="input sm" id="qPo" placeholder="po_number like" />
+      <input class="input sm" id="qRetailer" placeholder="dsco_retailer_id" />
+      <input class="input sm" id="qMSKU" placeholder="msku" />
+      <input class="input sm" id="qStatus" placeholder="status (e.g. 1,2,3)" />
+      <input class="input sm" id="qStartDT" type="datetime-local" />
+      <input class="input sm" id="qEndDT" type="datetime-local" />
+      <select class="select sm" id="qLimit" onchange="adminSetOrdersLimit()">
+        <option value="20">20 / page</option>
+        <option value="50" selected>50 / page</option>
+        <option value="100">100 / page</option>
+        <option value="200">200 / page</option>
+      </select>
       <button class="btn" onclick="adminLoadOrders(0)">Search</button>
       <button class="btn" onclick="adminExportOrders()">Export CSV</button>
     </div>
-    <div class="muted" style="margin-top: 8px;">时间按 <code id="tzLabel"></code> 展示；筛选输入按该时区解释；end 为开区间。</div>
+    <div class="muted" style="margin-top: 8px;">时间按 <code id="tzLabel"></code> 显示；筛选输入按该时区解释；end 为开区间。</div>
   </div>
 
   <div class="card" style="margin-top: 16px;">
@@ -44,7 +50,7 @@
       <div class="spacer"></div>
       <div class="muted" id="ordersPage"></div>
     </div>
-    <div id="toast" class="toast" style="display:none;"></div>
   </div>
   {{ template "layout_foot" . }}
 {{ end }}
+

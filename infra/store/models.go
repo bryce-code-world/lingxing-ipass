@@ -19,7 +19,7 @@ type DSCOOrderSyncRow struct {
 	DSCOStatus        string          `gorm:"column:dsco_status"`
 	Status            int16           `gorm:"column:status"`
 	Payload           json.RawMessage `gorm:"column:payload"`
-	MSKUs             []string        `gorm:"column:mskus;type:text[]"`
+	MSKUs             PGTextArray     `gorm:"column:mskus;type:text[]"`
 	WarehouseID       string          `gorm:"column:warehouse_id"`
 	Shipment          string          `gorm:"column:shipment"`
 	ShippedTrackingNo string          `gorm:"column:shipped_tracking_no"`

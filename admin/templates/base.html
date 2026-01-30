@@ -27,6 +27,26 @@
 
 {{ define "layout_foot" }}
     </div>
+
+    <!-- 全局弹窗提示（居中更醒目） -->
+    <div id="toastModal" class="modal" style="display:none;">
+      <div class="modal-mask"></div>
+      <div class="modal-box">
+        <div id="toastText" class="modal-text"></div>
+        <div class="modal-actions">
+          <button id="toastClose" class="btn primary" type="button">OK</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 全局加载遮罩：请求中禁止重复点击 -->
+    <div id="loadingModal" class="loading" style="display:none;">
+      <div class="loading-mask"></div>
+      <div class="loading-box">
+        <div class="spinner"></div>
+        <div class="loading-text">Loading...</div>
+      </div>
+    </div>
   </body>
 </html>
 {{ end }}

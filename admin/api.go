@@ -144,6 +144,19 @@ func (s *Server) apiRunOneJob(c *gin.Context) {
 }
 
 func (s *Server) apiListOrders(c *gin.Context) {
+	type orderItem struct {
+		ID                int64  `json:"id"`
+		PONumber          string `json:"po_number"`
+		DSCOCreateTime    int64  `json:"dsco_create_time"`
+		DSCOStatus        string `json:"dsco_status"`
+		Status            int16  `json:"status"`
+		WarehouseID       string `json:"warehouse_id"`
+		Shipment          string `json:"shipment"`
+		DSCOREtailerID    string `json:"dsco_retailer_id"`
+		ShippedTrackingNo string `json:"shipped_tracking_no"`
+		DSCOInvoiceID     string `json:"dsco_invoice_id"`
+	}
+
 	filter := store.DSCOOrderSyncListFilter{
 		Offset:         parseInt(c.Query("offset"), 0),
 		Limit:          parseInt(c.Query("limit"), 50),
@@ -174,7 +187,22 @@ func (s *Server) apiListOrders(c *gin.Context) {
 		fail(c, http.StatusInternalServerError, 500, err.Error())
 		return
 	}
-	ok(c, map[string]any{"items": items, "total": total})
+	out := make([]orderItem, 0, len(items))
+	for _, it := range items {
+		out = append(out, orderItem{
+			ID:                it.ID,
+			PONumber:          it.PONumber,
+			DSCOCreateTime:    it.DSCOCreateTime,
+			DSCOStatus:        it.DSCOStatus,
+			Status:            it.Status,
+			WarehouseID:       it.WarehouseID,
+			Shipment:          it.Shipment,
+			DSCOREtailerID:    it.DSCOREtailerID,
+			ShippedTrackingNo: it.ShippedTrackingNo,
+			DSCOInvoiceID:     it.DSCOInvoiceID,
+		})
+	}
+	ok(c, map[string]any{"items": out, "total": total})
 }
 
 func (s *Server) apiOrderDetail(c *gin.Context) {
@@ -250,6 +278,19 @@ func (s *Server) apiManualPullOrders(c *gin.Context) {
 }
 
 func (s *Server) apiListWarehouseSync(c *gin.Context) {
+	type warehouseItem struct {
+		ID                   int64  `json:"id"`
+		SyncTime             int64  `json:"sync_time"`
+		DSCOWarehouseID      string `json:"dsco_warehouse_id"`
+		DSCOWarehouseSKU     string `json:"dsco_warehouse_sku"`
+		DSCOWarehouseNum     int    `json:"dsco_warehouse_num"`
+		LingXingWarehouseID  string `json:"lingxing_warehouse_id"`
+		LingXingWarehouseSKU string `json:"lingxing_warehouse_sku"`
+		LingXingWarehouseNum int    `json:"lingxing_warehouse_num"`
+		Status               int16  `json:"status"`
+		Reason               string `json:"reason"`
+	}
+
 	filter := store.DSCOWarehouseSyncListFilter{
 		Offset:               parseInt(c.Query("offset"), 0),
 		Limit:                parseInt(c.Query("limit"), 50),
@@ -281,7 +322,22 @@ func (s *Server) apiListWarehouseSync(c *gin.Context) {
 		fail(c, http.StatusInternalServerError, 500, err.Error())
 		return
 	}
-	ok(c, map[string]any{"items": items, "total": total})
+	out := make([]warehouseItem, 0, len(items))
+	for _, it := range items {
+		out = append(out, warehouseItem{
+			ID:                   it.ID,
+			SyncTime:             it.SyncTime,
+			DSCOWarehouseID:      it.DSCOWarehouseID,
+			DSCOWarehouseSKU:     it.DSCOWarehouseSKU,
+			DSCOWarehouseNum:     it.DSCOWarehouseNum,
+			LingXingWarehouseID:  it.LingXingWarehouseID,
+			LingXingWarehouseSKU: it.LingXingWarehouseSKU,
+			LingXingWarehouseNum: it.LingXingWarehouseNum,
+			Status:               it.Status,
+			Reason:               it.Reason,
+		})
+	}
+	ok(c, map[string]any{"items": out, "total": total})
 }
 
 func (s *Server) apiExportOrders(c *gin.Context) {

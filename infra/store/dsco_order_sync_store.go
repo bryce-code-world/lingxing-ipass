@@ -71,7 +71,7 @@ func (s *DSCOOrderSyncStore) Upsert(ctx context.Context, row DSCOOrderSyncRow) e
 		    shipped_tracking_no=EXCLUDED.shipped_tracking_no,
 		    dsco_invoice_id=EXCLUDED.dsco_invoice_id,
 		    updated_at=EXCLUDED.updated_at`,
-		row.PONumber, row.DSCOCreateTime, row.DSCOREtailerID, row.DSCOStatus, row.Status, string(row.Payload), toPGTextArrayLiteral(row.MSKUs),
+		row.PONumber, row.DSCOCreateTime, row.DSCOREtailerID, row.DSCOStatus, row.Status, string(row.Payload), toPGTextArrayLiteral([]string(row.MSKUs)),
 		row.WarehouseID, row.Shipment, row.ShippedTrackingNo, row.DSCOInvoiceID,
 		row.CreatedAt, row.UpdatedAt,
 	).Error

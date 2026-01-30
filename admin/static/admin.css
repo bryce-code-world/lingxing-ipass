@@ -78,7 +78,7 @@ body {
 }
 .row.wrap { flex-wrap: wrap; }
 
-.input, .textarea {
+.input, .textarea, .select {
   width: 100%;
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -86,6 +86,10 @@ body {
   font-size: 14px;
   background: rgba(255,255,255,0.9);
   outline: none;
+}
+.select {
+  appearance: none;
+  cursor: pointer;
 }
 .textarea {
   margin-top: 10px;
@@ -110,6 +114,12 @@ body {
 }
 .btn:hover { filter: brightness(0.98); }
 .btn:active { transform: translateY(0.5px); }
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  filter: none;
+  transform: none;
+}
 
 .table {
   width: 100%;
@@ -136,18 +146,85 @@ body {
   font-size: 13px;
 }
 
-.toast {
+/* 全局弹窗（居中提示） */
+.modal, .loading {
   position: fixed;
-  bottom: 18px;
-  right: 18px;
-  max-width: 520px;
-  background: rgba(17,24,39,0.92);
-  color: #fff;
-  padding: 12px 14px;
-  border-radius: 14px;
-  box-shadow: 0 18px 40px rgba(0,0,0,0.25);
-  font-size: 13px;
+  inset: 0;
+  z-index: 200;
+}
+.modal-mask, .loading-mask {
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,0.28);
+  backdrop-filter: blur(2px);
+}
+.modal-box {
+  position: absolute;
+  left: 50%;
+  top: 18%;
+  transform: translateX(-50%);
+  width: min(860px, calc(100% - 36px));
+  background: rgba(255,255,255,0.95);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  box-shadow: 0 28px 70px rgba(0,0,0,0.22);
+  padding: 18px 18px 14px;
+}
+.modal-text {
+  font-size: 16px;
+  line-height: 1.5;
   white-space: pre-wrap;
+}
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 14px;
+}
+.modal.error .modal-box {
+  border-color: rgba(255,59,48,0.26);
+}
+.modal.error .modal-text {
+  color: #b91c1c;
+}
+.modal.ok .modal-text {
+  color: #111827;
+}
+
+.loading-box {
+  position: absolute;
+  left: 50%;
+  top: 18%;
+  transform: translateX(-50%);
+  width: min(420px, calc(100% - 36px));
+  background: rgba(255,255,255,0.92);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  box-shadow: 0 28px 70px rgba(0,0,0,0.22);
+  padding: 16px 18px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.loading-text { font-size: 14px; color: var(--muted); }
+.spinner {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid rgba(0,0,0,0.18);
+  border-top-color: var(--primary);
+  animation: spin 0.9s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.row.filters .input.sm,
+.row.filters .select.sm {
+  width: auto;
+  flex: 1 1 220px;
+  min-width: 180px;
+}
+.row.filters .btn {
+  width: auto;
+  flex: 0 0 auto;
 }
 
 @media (max-width: 900px) {

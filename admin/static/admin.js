@@ -1,12 +1,84 @@
 function qs(id) { return document.getElementById(id); }
 
-function showToast(msg) {
-  const el = qs("toast");
-  if (!el) return;
-  el.textContent = msg;
-  el.style.display = "block";
+let __busyCount = 0;
+
+function setButtonsDisabled(disabled) {
+  for (const btn of document.querySelectorAll("button.btn")) {
+    btn.disabled = !!disabled;
+  }
+}
+
+function showLoading(text) {
+  const m = qs("loadingModal");
+  if (!m) return;
+  const t = m.querySelector(".loading-text");
+  if (t && text) t.textContent = text;
+  m.style.display = "block";
+}
+
+function hideLoading() {
+  const m = qs("loadingModal");
+  if (!m) return;
+  m.style.display = "none";
+}
+
+function beginBusy(label) {
+  __busyCount += 1;
+  if (__busyCount === 1) {
+    setButtonsDisabled(true);
+    showLoading(label || "Loading...");
+  }
+}
+
+function endBusy() {
+  __busyCount = Math.max(0, __busyCount - 1);
+  if (__busyCount === 0) {
+    setButtonsDisabled(false);
+    hideLoading();
+  }
+}
+
+function inferToastKind(msg) {
+  const s = String(msg || "");
+  if (s.includes(": OK") || s.trim() === "OK" || s.endsWith(" OK")) return "ok";
+  return "error";
+}
+
+function showToast(msg, kind) {
+  const modal = qs("toastModal");
+  const text = qs("toastText");
+  if (!modal || !text) return;
+
+  const k = kind || inferToastKind(msg);
+  modal.classList.remove("ok", "error");
+  modal.classList.add(k === "ok" ? "ok" : "error");
+
+  text.textContent = String(msg || "");
+  modal.style.display = "block";
+
   clearTimeout(window.__toastTimer);
-  window.__toastTimer = setTimeout(() => { el.style.display = "none"; }, 3500);
+  if (k === "ok") {
+    window.__toastTimer = setTimeout(() => { modal.style.display = "none"; }, 1800);
+  }
+}
+
+function hideToast() {
+  const modal = qs("toastModal");
+  if (!modal) return;
+  modal.style.display = "none";
+}
+
+function initGlobalUI() {
+  const btn = qs("toastClose");
+  if (btn) btn.addEventListener("click", hideToast);
+  const modal = qs("toastModal");
+  if (modal) {
+    const mask = modal.querySelector(".modal-mask");
+    if (mask) mask.addEventListener("click", hideToast);
+  }
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") hideToast();
+  });
 }
 
 function normalizeTZ(raw) {
@@ -127,32 +199,42 @@ function zonedDateTimeToUnixSec(parts, tz) {
 }
 
 async function apiJSON(method, url, body) {
-  const opts = { method, headers: { "Content-Type": "application/json" } };
-  if (body !== undefined) opts.body = JSON.stringify(body);
-  const res = await fetch(url, opts);
-  const data = await res.json().catch(() => null);
-  if (!res.ok || (data && data.code !== 0)) {
-    const msg = (data && data.message) ? data.message : (res.status + " " + res.statusText);
-    throw new Error(msg);
+  beginBusy(url);
+  try {
+    const opts = { method, headers: { "Content-Type": "application/json" } };
+    if (body !== undefined) opts.body = JSON.stringify(body);
+    const res = await fetch(url, opts);
+    const data = await res.json().catch(() => null);
+    if (!res.ok || (data && data.code !== 0)) {
+      const msg = (data && data.message) ? data.message : (res.status + " " + res.statusText);
+      throw new Error(msg);
+    }
+    return data.data;
+  } finally {
+    endBusy();
   }
-  return data.data;
 }
 
 async function apiDownload(url, body, filenameHint) {
-  const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
-  if (!res.ok) throw new Error(res.status + " " + res.statusText);
-  const blob = await res.blob();
-  const cd = res.headers.get("content-disposition") || "";
-  let filename = filenameHint || "export.csv";
-  const m = /filename=\"?([^\";]+)\"?/i.exec(cd);
-  if (m && m[1]) filename = m[1];
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  beginBusy(url);
+  try {
+    const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
+    if (!res.ok) throw new Error(res.status + " " + res.statusText);
+    const blob = await res.blob();
+    const cd = res.headers.get("content-disposition") || "";
+    let filename = filenameHint || "export.csv";
+    const m = /filename=\"?([^\";]+)\"?/i.exec(cd);
+    if (m && m[1]) filename = m[1];
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  } finally {
+    endBusy();
+  }
 }
 
 function adminReload() { location.reload(); }
@@ -164,6 +246,10 @@ function renderTimestamps() {
     el.title = raw || "";
   }
 }
+
+document.addEventListener("DOMContentLoaded", () => {
+  initGlobalUI();
+});
 
 async function adminRunAllJobs() {
   try {
@@ -248,6 +334,8 @@ function ordersFilter() {
 
 async function adminLoadOrders(offset) {
   try {
+    const lim = parseInt((qs("qLimit")?.value || "").trim(), 10);
+    if (Number.isFinite(lim) && lim > 0) ordersLimit = lim;
     ordersOffset = offset;
     const q = new URLSearchParams({ offset: String(ordersOffset), limit: String(ordersLimit), ...ordersFilter() });
     const data = await apiJSON("GET", "/admin/api/dsco_order_sync/list?" + q.toString());
@@ -262,7 +350,6 @@ async function adminLoadOrders(offset) {
       tr.innerHTML = `<td>${it.id}</td><td><code>${it.po_number}</code></td><td title="${it.dsco_create_time}">${fmtUnixSec(it.dsco_create_time)}</td><td>${it.dsco_status || ""}</td><td>${it.status}</td><td>${it.warehouse_id}</td><td>${it.shipment}</td><td>${it.dsco_retailer_id || ""}</td><td>${it.shipped_tracking_no}</td><td>${it.dsco_invoice_id}</td>`;
       tbody.appendChild(tr);
     }
-    showToast("Orders: OK");
   } catch (e) {
     showToast("Orders: " + e.message);
   }
@@ -270,6 +357,8 @@ async function adminLoadOrders(offset) {
 
 function adminPrevOrders() { adminLoadOrders(Math.max(0, ordersOffset - ordersLimit)); }
 function adminNextOrders() { adminLoadOrders(Math.min(Math.max(0, ordersTotal - ordersLimit), ordersOffset + ordersLimit)); }
+
+function adminSetOrdersLimit() { adminLoadOrders(0); }
 
 async function adminExportOrders() {
   try {
@@ -310,6 +399,8 @@ function whFilter() {
 
 async function adminLoadWarehouses(offset) {
   try {
+    const lim = parseInt((qs("wLimit")?.value || "").trim(), 10);
+    if (Number.isFinite(lim) && lim > 0) whLimit = lim;
     whOffset = offset;
     const q = new URLSearchParams({ offset: String(whOffset), limit: String(whLimit), ...whFilter() });
     const data = await apiJSON("GET", "/admin/api/dsco_warehouse_sync/list?" + q.toString());
@@ -324,7 +415,6 @@ async function adminLoadWarehouses(offset) {
       tr.innerHTML = `<td>${it.id}</td><td title="${it.sync_time}">${fmtUnixSec(it.sync_time)}</td><td>${it.dsco_warehouse_id}</td><td>${it.dsco_warehouse_sku}</td><td>${it.dsco_warehouse_num}</td><td>${it.lingxing_warehouse_id}</td><td>${it.lingxing_warehouse_sku}</td><td>${it.lingxing_warehouse_num}</td><td>${it.status}</td><td>${it.reason}</td>`;
       tbody.appendChild(tr);
     }
-    showToast("Warehouses: OK");
   } catch (e) {
     showToast("Warehouses: " + e.message);
   }
@@ -332,6 +422,8 @@ async function adminLoadWarehouses(offset) {
 
 function adminPrevWarehouses() { adminLoadWarehouses(Math.max(0, whOffset - whLimit)); }
 function adminNextWarehouses() { adminLoadWarehouses(Math.min(Math.max(0, whTotal - whLimit), whOffset + whLimit)); }
+
+function adminSetWarehousesLimit() { adminLoadWarehouses(0); }
 
 async function adminExportWarehouses() {
   try {
@@ -354,4 +446,6 @@ async function adminExportWarehouses() {
 document.addEventListener("DOMContentLoaded", () => {
   setTZLabel();
   renderTimestamps();
+  if (qs("ordersTable")) adminLoadOrders(0);
+  if (qs("whTable")) adminLoadWarehouses(0);
 });

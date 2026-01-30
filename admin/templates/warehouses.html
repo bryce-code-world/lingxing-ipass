@@ -2,18 +2,24 @@
   {{ template "layout_head" . }}
   <h1 class="h1">DSCO Warehouse Sync</h1>
   <div class="card">
-    <div class="row wrap">
-      <input class="input" id="wDscoWh" placeholder="dsco_warehouse_id" />
-      <input class="input" id="wDscoSku" placeholder="dsco_warehouse_sku" />
-      <input class="input" id="wLxWh" placeholder="lingxing_warehouse_id" />
-      <input class="input" id="wLxSku" placeholder="lingxing_warehouse_sku" />
-      <input class="input" id="wStatus" placeholder="status (1,2)" />
-      <input class="input" id="wStartDT" type="datetime-local" />
-      <input class="input" id="wEndDT" type="datetime-local" />
+    <div class="row wrap filters">
+      <input class="input sm" id="wDscoWh" placeholder="dsco_warehouse_id" />
+      <input class="input sm" id="wDscoSku" placeholder="dsco_warehouse_sku" />
+      <input class="input sm" id="wLxWh" placeholder="lingxing_warehouse_id" />
+      <input class="input sm" id="wLxSku" placeholder="lingxing_warehouse_sku" />
+      <input class="input sm" id="wStatus" placeholder="status (1,2)" />
+      <input class="input sm" id="wStartDT" type="datetime-local" />
+      <input class="input sm" id="wEndDT" type="datetime-local" />
+      <select class="select sm" id="wLimit" onchange="adminSetWarehousesLimit()">
+        <option value="20">20 / page</option>
+        <option value="50" selected>50 / page</option>
+        <option value="100">100 / page</option>
+        <option value="200">200 / page</option>
+      </select>
       <button class="btn" onclick="adminLoadWarehouses(0)">Search</button>
       <button class="btn" onclick="adminExportWarehouses()">Export CSV</button>
     </div>
-    <div class="muted" style="margin-top: 8px;">时间按 <code id="tzLabel"></code> 展示；筛选输入按该时区解释；end 为开区间。</div>
+    <div class="muted" style="margin-top: 8px;">时间按 <code id="tzLabel"></code> 显示；筛选输入按该时区解释；end 为开区间。</div>
   </div>
 
   <div class="card" style="margin-top: 16px;">
@@ -45,7 +51,7 @@
       <div class="spacer"></div>
       <div class="muted" id="whPage"></div>
     </div>
-    <div id="toast" class="toast" style="display:none;"></div>
   </div>
   {{ template "layout_foot" . }}
 {{ end }}
+
