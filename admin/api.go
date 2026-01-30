@@ -145,16 +145,17 @@ func (s *Server) apiRunOneJob(c *gin.Context) {
 
 func (s *Server) apiListOrders(c *gin.Context) {
 	type orderItem struct {
-		ID                int64  `json:"id"`
-		PONumber          string `json:"po_number"`
-		DSCOCreateTime    int64  `json:"dsco_create_time"`
-		DSCOStatus        string `json:"dsco_status"`
-		Status            int16  `json:"status"`
-		WarehouseID       string `json:"warehouse_id"`
-		Shipment          string `json:"shipment"`
-		DSCOREtailerID    string `json:"dsco_retailer_id"`
-		ShippedTrackingNo string `json:"shipped_tracking_no"`
-		DSCOInvoiceID     string `json:"dsco_invoice_id"`
+		ID                int64    `json:"id"`
+		PONumber          string   `json:"po_number"`
+		DSCOCreateTime    int64    `json:"dsco_create_time"`
+		DSCOStatus        string   `json:"dsco_status"`
+		Status            int16    `json:"status"`
+		MSKUs             []string `json:"mskus"`
+		WarehouseID       string   `json:"warehouse_id"`
+		Shipment          string   `json:"shipment"`
+		DSCOREtailerID    string   `json:"dsco_retailer_id"`
+		ShippedTrackingNo string   `json:"shipped_tracking_no"`
+		DSCOInvoiceID     string   `json:"dsco_invoice_id"`
 	}
 
 	filter := store.DSCOOrderSyncListFilter{
@@ -196,6 +197,7 @@ func (s *Server) apiListOrders(c *gin.Context) {
 			DSCOCreateTime:    it.DSCOCreateTime,
 			DSCOStatus:        it.DSCOStatus,
 			Status:            it.Status,
+			MSKUs:             []string(it.MSKUs),
 			WarehouseID:       it.WarehouseID,
 			Shipment:          it.Shipment,
 			DSCOREtailerID:    it.DSCOREtailerID,

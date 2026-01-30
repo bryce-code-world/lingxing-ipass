@@ -350,8 +350,11 @@ async function adminLoadOrders(offset) {
     tbody.innerHTML = "";
     for (const it of (data.items || [])) {
       const poJSON = JSON.stringify(it.po_number || "");
+      const skus = Array.isArray(it.mskus) ? it.mskus.filter(s => String(s || "").trim() !== "") : [];
+      const skuText = skus.join(", ");
+      const skuShow = skuText.length > 40 ? (skuText.slice(0, 40) + "...") : skuText;
       const tr = document.createElement("tr");
-      tr.innerHTML = `<td>${it.id}</td><td><code>${it.po_number}</code></td><td title="${it.dsco_create_time}">${fmtUnixSec(it.dsco_create_time)}</td><td>${it.dsco_status || ""}</td><td>${it.status}</td><td>${it.warehouse_id}</td><td>${it.shipment}</td><td>${it.dsco_retailer_id || ""}</td><td>${it.shipped_tracking_no}</td><td>${it.dsco_invoice_id}</td><td><button class="btn" onclick='adminOpenEditOrderStatus(${poJSON}, ${it.status})'>Edit</button></td>`;
+      tr.innerHTML = `<td>${it.id}</td><td><code>${it.po_number}</code></td><td title="${it.dsco_create_time}">${fmtUnixSec(it.dsco_create_time)}</td><td>${it.dsco_status || ""}</td><td>${it.status}</td><td>${it.warehouse_id}</td><td>${it.shipment}</td><td>${it.dsco_retailer_id || ""}</td><td title="${skuText.replace(/\"/g, '&quot;')}"><code>${skuShow}</code></td><td>${it.shipped_tracking_no}</td><td>${it.dsco_invoice_id}</td><td><button class="btn" onclick='adminOpenEditOrderStatus(${poJSON}, ${it.status})'>Edit</button></td>`;
       tbody.appendChild(tr);
     }
   } catch (e) {
