@@ -238,3 +238,25 @@ func lingxingSIDFromMapping(cfg runtimecfg.Config, o dsco.Order) (int, bool) {
 	}
 	return v, true
 }
+
+func dscoStatusToSyncStatus(dscoStatus string) (int16, bool) {
+	// 约定：拉单入库时，根据 DSCO 订单的 dsco_status 推导本地同步状态。
+	//
+	// - created          -> 1（待同步：推单到领星）
+	// - shipment_pending -> 3（待发货回传：已确认）
+	// - shipped          -> 5（完成：视为已处于后置阶段）
+	// - cancelled        -> 6（已取消）
+	s := strings.ToLower(strings.TrimSpace(dscoStatus))
+	switch s {
+	case "created":
+		return 1, true
+	case "shipment_pending":
+		return 3, true
+	case "shipped":
+		return 5, true
+	case "cancelled":
+		return 6, true
+	default:
+		return 0, false
+	}
+}

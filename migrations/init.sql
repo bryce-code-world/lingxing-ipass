@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS dsco_order_sync (
   updated_at            bigint   NOT NULL DEFAULT (EXTRACT(EPOCH FROM now())::bigint),
 
   CONSTRAINT uk_dsco_order_sync_po_number UNIQUE (po_number),
-  CONSTRAINT ck_dsco_order_sync_status CHECK (status BETWEEN 1 AND 5)
+  CONSTRAINT ck_dsco_order_sync_status CHECK (status BETWEEN 1 AND 6)
 );
 
 CREATE INDEX IF NOT EXISTS idx_dsco_order_sync_create_time
@@ -66,7 +66,7 @@ COMMENT ON COLUMN dsco_order_sync.po_number IS 'DSCO 订单唯一键（po_number
 COMMENT ON COLUMN dsco_order_sync.dsco_retailer_id IS 'DSCO retailer id（用于 mapping.shop 与查询筛选）';
 COMMENT ON COLUMN dsco_order_sync.dsco_status IS 'DSCO 订单拉取时状态（例如 created、shipment_pending、shipped、completed）';
 COMMENT ON COLUMN dsco_order_sync.dsco_create_time IS 'DSCO 订单 created_at（UTC 秒级时间戳；用于增量拉单与筛选）';
-COMMENT ON COLUMN dsco_order_sync.status IS '同步状态：1待同步（推单到领星）2待确认（回传 ack）3待发货回传（已确认）4待发票回传（已发货）5完成（已回传发票）';
+COMMENT ON COLUMN dsco_order_sync.status IS '同步状态：1待同步（推单到领星）2待确认（回传 ack）3待发货回传（已确认）4待发票回传（已发货）5完成（已回传发票）6（已取消）';
 COMMENT ON COLUMN dsco_order_sync.payload IS 'DSCO 原始订单 JSON（覆盖更新）';
 COMMENT ON COLUMN dsco_order_sync.mskus IS '订单 SKU 列表（用于筛选/导出）';
 COMMENT ON COLUMN dsco_order_sync.warehouse_id IS 'DSCO 仓库编码（warehouseCode；用于 mapping.warehouse 与筛选/导出）';

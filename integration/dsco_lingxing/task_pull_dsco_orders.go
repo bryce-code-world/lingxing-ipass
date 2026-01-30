@@ -134,12 +134,20 @@ func (d *Domain) PullDSCOOrders(ctx integration.TaskContext) error {
 			}
 
 			// 3.3) 入库行：只写入一期需要的字段，其它信息存入 payload
+			dscoStatus := strings.TrimSpace(order.DscoStatus)
+			rowStatus := status
+			if dscoStatus != "" {
+				// 约定：拉单入库时，根据 dsco_status 推导入库 status（见 dscoStatusToSyncStatus）。
+				if mapped, ok := dscoStatusToSyncStatus(dscoStatus); ok {
+					rowStatus = mapped
+				}
+			}
 			row := store.DSCOOrderSyncRow{
 				PONumber:       order.PoNumber,
 				DSCOCreateTime: createUnix,
 				DSCOREtailerID: derefString(order.DscoRetailerID),
-				DSCOStatus:     strings.TrimSpace(order.DscoStatus),
-				Status:         status,
+				DSCOStatus:     dscoStatus,
+				Status:         rowStatus,
 				Payload:        json.RawMessage(raw),
 				MSKUs:          store.PGTextArray(mskus),
 				WarehouseID:    getDSCOWarehouseCode(order),
