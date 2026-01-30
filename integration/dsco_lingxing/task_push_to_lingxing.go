@@ -11,12 +11,24 @@ import (
 	"lingxingipass/integration"
 )
 
+// PushToLingXing 将 DSCO 订单推送到领星创建订单（CreateOrdersV2）。
+//
+// 流程（一期口径）：
+//  1. 从 dsco_order_sync 中筛选 status=1 的订单（待推单）。
+//  2. 解析 DSCO 原始订单 payload，校验关键字段（poNumber/地址/行项目）。
+//  3. 映射（匹配不到一律跳过）：
+//     - mapping.shop：dscoRetailerId -> 领星 store_id
+//     - mapping.warehouse：requestedWarehouseCode -> 领星 WID
+//     - mapping.shipment：<shipWarehouseCode(空则用 requestedWarehouseCode)>-<shippingServiceLevelCode> -> 领星 logistics_type_id
+//  4. 幂等：创建前先查领星是否已存在该 poNumber；存在则直接推进状态到 2，不重复创建。
+//  5. 调用 CreateOrdersV2（最小必要字段），成功后推进状态到 2。
 func (d *Domain) PushToLingXing(ctx integration.TaskContext) error {
 	taskCtx := ctx.Ctx
 	if taskCtx == nil {
 		taskCtx = context.Background()
 	}
 
+	// 1) 取待推单（status=1）
 	items, err := d.orderStore.FindByStatus(taskCtx, 1, ctx.Size)
 	if err != nil {
 		return err
@@ -25,12 +37,14 @@ func (d *Domain) PushToLingXing(ctx integration.TaskContext) error {
 		return nil
 	}
 
+	// 2) 初始化领星客户端
 	lx, err := d.lingxingClient(taskCtx)
 	if err != nil {
 		return err
 	}
 
 	for _, row := range items {
+		// 2.1) 解析 DSCO 原始订单 payload（payload 保留原始 JSON，方便审计/排查）
 		order, err := decodeDSCOOrder(row.Payload)
 		if err != nil {
 			logger.Warn(taskCtx, "decode dsco payload failed", "err", err)
@@ -40,6 +54,8 @@ func (d *Domain) PushToLingXing(ctx integration.TaskContext) error {
 			logger.Warn(taskCtx, "dsco poNumber empty, skip")
 			continue
 		}
+
+		// 3) 店铺映射：dscoRetailerId -> 领星 store_id（用于领星创建订单）
 		shopKey := strings.TrimSpace(derefString(order.DscoRetailerID))
 		storeID := ""
 		if shopKey != "" {
@@ -50,6 +66,7 @@ func (d *Domain) PushToLingXing(ctx integration.TaskContext) error {
 			continue
 		}
 
+		// 3.1) 仓库映射：requestedWarehouseCode -> 领星 WID（空则允许不传）
 		wid := ""
 		dscoWarehouse := getDSCOWarehouseCode(order)
 		if dscoWarehouse != "" {
@@ -58,6 +75,9 @@ func (d *Domain) PushToLingXing(ctx integration.TaskContext) error {
 			}
 		}
 
+		// 3.2) 物流方式映射（用于领星 LogisticsTypeID）：
+		// key = <shipWarehouseCode>-<shippingServiceLevelCode>
+		// shipWarehouseCode 缺失时允许使用 requestedWarehouseCode 兜底（已确认）。
 		logisticsTypeID := ""
 		if wid != "" {
 			shipWarehouseCode := strings.TrimSpace(derefString(order.ShipWarehouseCode))
@@ -73,7 +93,7 @@ func (d *Domain) PushToLingXing(ctx integration.TaskContext) error {
 			}
 		}
 
-		// Idempotency: if order already exists in LingXing, just advance status and continue.
+		// 4) 幂等：若领星已存在该 poNumber，则不再创建，直接推进状态到 2。
 		if _, err := lx.Order.GetOrderDetailV2(taskCtx, lingxing.OrderDetailV2Request{PlatformOrderNo: order.PoNumber}); err == nil {
 			if err := d.orderStore.UpdateStatusAndFields(taskCtx, order.PoNumber, 2, "", ""); err != nil {
 				logger.Warn(taskCtx, "update status failed", "err", err)
@@ -81,6 +101,7 @@ func (d *Domain) PushToLingXing(ctx integration.TaskContext) error {
 			continue
 		}
 
+		// 2.2) 地址校验（MVP：仅校验最小必填；更严格校验后续可根据日志再补）
 		addr := order.Shipping
 		if addr == nil {
 			logger.Warn(taskCtx, "missing shipping address", "po_number", order.PoNumber)
@@ -105,6 +126,9 @@ func (d *Domain) PushToLingXing(ctx integration.TaskContext) error {
 			continue
 		}
 
+		// 2.3) 行项目组装：
+		// - SKU 不映射：直接使用 DSCO sku/partnerSku 赋值到领星 MSKU（领星侧自动匹配）。
+		// - 单价：按字段优先级选择，尽量避免领星校验失败。
 		createItems := make([]lingxing.CreateOrderItemV2, 0, len(order.LineItems))
 		for _, li := range order.LineItems {
 			msku := ""
@@ -132,6 +156,7 @@ func (d *Domain) PushToLingXing(ctx integration.TaskContext) error {
 			continue
 		}
 
+		// 5) 调用领星 CreateOrdersV2（最小必要字段）
 		req := lingxing.CreateOrdersV2Request{
 			PlatformCode: lingxing.PlatformCode(d.env.Integration.LingXing.PlatformCode),
 			StoreID:      storeID,
@@ -144,7 +169,7 @@ func (d *Domain) PushToLingXing(ctx integration.TaskContext) error {
 					AddressLine1:        line1,
 					WID:                 wid,
 					LogisticsTypeID:     logisticsTypeID,
-					AmountCurrency:      "USD", // DSCO 用户都是美国用户，币种为固定值
+					AmountCurrency:      "USD", // 一期口径：DSCO 订单均为美国站点，币种固定 USD
 					Items:               createItems,
 				},
 			},
@@ -156,11 +181,12 @@ func (d *Domain) PushToLingXing(ctx integration.TaskContext) error {
 			continue
 		}
 		if len(resp.SuccessDetails) == 0 && len(resp.ErrorDetails) > 0 {
-			// Keep simple: do not advance status, rely on retry.
+			// 保持简单：不推进状态，下次定时任务自动重试；失败原因仅日志。
 			logger.Warn(taskCtx, "lingxing create order error detail", "po_number", order.PoNumber, "msg", resp.ErrorDetails[0].ErrorMessage)
 			continue
 		}
 
+		// 6) 推单成功：推进状态到 2（待回传 ACK）
 		if err := d.orderStore.UpdateStatusAndFields(taskCtx, order.PoNumber, 2, "", ""); err != nil {
 			logger.Warn(taskCtx, "update status failed", "err", err)
 			continue
@@ -169,6 +195,11 @@ func (d *Domain) PushToLingXing(ctx integration.TaskContext) error {
 	return nil
 }
 
+// pickUnitPrice 选择“最可能可用”的单价字段。
+//
+// 说明：
+// - 一期目标是“先跑通闭环”，当遇到领星侧对价格字段的校验时，优先保证有值。
+// - 若后续需要严格口径（例如税前/税后/平台价），再根据业务确认调整优先级。
 func pickUnitPrice(li dsco.OrderLineItem) (float64, bool) {
 	if li.ConsumerPriceWithTax != nil && *li.ConsumerPriceWithTax > 0 {
 		return *li.ConsumerPriceWithTax, true

@@ -12,12 +12,28 @@ import (
 	"lingxingipass/integration"
 )
 
+// PullDSCOOrders 拉取 DSCO 订单并入库到 dsco_order_sync。
+//
+// 流程说明（一期口径）：
+//  1. 计算拉取时间窗口：
+//     - 手动触发：使用 Admin 传入的 [start,end)（UTC 秒级）范围，并允许指定入库初始 status。
+//     - 定时触发：使用 dsco_order_sync.dsco_create_time 的最大值作为游标（增量拉取）。
+//     若表为空，则从 2025-01-01 00:00:00 (UTC) 开始拉取。
+//  2. 调用 DSCO Order.GetPageRaw 进行分页拉取（scrollId）。
+//  3. 对每条订单：
+//     - dsco_create_time：仅使用 dscoCreateDate（已确认），解析为 UTC 秒级时间戳。
+//     - mskus：提取行项目 partnerSku/sku，用于筛选与导出。
+//     - warehouse_id：使用 requestedWarehouseCode（MVP 口径）。
+//     - shipment：使用 shippingServiceLevelCode（你已确认），用于筛选与导出。
+//     - dsco_retailer_id：写入 dscoRetailerId，用于 mapping.shop（店铺映射）。
+//  4. Upsert 入库：允许覆盖 payload/status（用于初始化补数据/人工修复）。
 func (d *Domain) PullDSCOOrders(ctx integration.TaskContext) error {
 	taskCtx := ctx.Ctx
 	if taskCtx == nil {
 		taskCtx = context.Background()
 	}
 
+	// 1) 初始化 DSCO 客户端
 	cli, err := d.dscoClient()
 	if err != nil {
 		return err
@@ -30,6 +46,7 @@ func (d *Domain) PullDSCOOrders(ctx integration.TaskContext) error {
 	)
 
 	if ctx.Trigger == integration.TriggerManual && ctx.Override != nil {
+		// 1.1) 手动触发：从 Override 中解析范围与入库状态
 		ov, ok := ctx.Override.(integration.PullDSCOOrdersOverride)
 		if !ok {
 			if p, ok2 := ctx.Override.(*integration.PullDSCOOrdersOverride); ok2 && p != nil {
@@ -46,6 +63,7 @@ func (d *Domain) PullDSCOOrders(ctx integration.TaskContext) error {
 
 	// Default: incremental cursor from dsco_order_sync.dsco_create_time.
 	if since.IsZero() || until.IsZero() {
+		// 1.2) 定时触发：用 dsco_create_time 最大值作为游标；表空则从固定起点开始
 		maxTime, ok, err := d.orderStore.GetMaxDSCOCreateTime(taskCtx)
 		if err != nil {
 			return err
@@ -58,6 +76,7 @@ func (d *Domain) PullDSCOOrders(ctx integration.TaskContext) error {
 
 		until = time.Now().UTC().Add(-10 * time.Second)
 	}
+	// 2) 组装 DSCO 分页查询：基于 created_at（dscoCreateDate）区间
 	q := dsco.OrderPageQuery{
 		OrdersCreatedSince: since.Format(time.RFC3339),
 		Until:              until.Format(time.RFC3339),
@@ -67,6 +86,7 @@ func (d *Domain) PullDSCOOrders(ctx integration.TaskContext) error {
 	var pulled int
 	var scroll string
 	for {
+		// 2.1) scrollId 分页：DSCO 返回 scrollId 代表下一页
 		if scroll != "" {
 			q.ScrollID = scroll
 		}
@@ -79,11 +99,13 @@ func (d *Domain) PullDSCOOrders(ctx integration.TaskContext) error {
 			break
 		}
 		for _, raw := range resp.Orders {
+			// 3) 解析订单 payload（保留原始 JSON 以便审计/排查）
 			order, err := decodeDSCOOrder(raw)
 			if err != nil {
 				logger.Warn(taskCtx, "decode dsco order failed", "err", err)
 				continue
 			}
+			// 3.1) dsco_create_time：仅使用 dscoCreateDate（RFC3339 -> UTC 秒）
 			createStr := derefString(order.DscoCreateDate)
 			createUnix, err := parseRFC3339ToUnixSec(createStr)
 			if err != nil {
@@ -93,11 +115,13 @@ func (d *Domain) PullDSCOOrders(ctx integration.TaskContext) error {
 
 			// Enforce [start, end) boundary for manual pull (in UTC seconds).
 			if ctx.Trigger == integration.TriggerManual && !since.IsZero() && !until.IsZero() {
+				// 手动拉单范围边界：[start,end)
 				if createUnix < since.Unix() || createUnix >= until.Unix() {
 					continue
 				}
 			}
 
+			// 3.2) mskus：提取 partnerSku/sku（用于列表筛选、CSV 导出）
 			mskus := make([]string, 0, len(order.LineItems))
 			for _, li := range order.LineItems {
 				if li.PartnerSKU != nil && *li.PartnerSKU != "" {
@@ -107,6 +131,7 @@ func (d *Domain) PullDSCOOrders(ctx integration.TaskContext) error {
 				}
 			}
 
+			// 3.3) 入库行：只写入一期需要的字段，其余信息存入 payload
 			row := store.DSCOOrderSyncRow{
 				PONumber:       order.PoNumber,
 				DSCOCreateTime: createUnix,
@@ -117,6 +142,7 @@ func (d *Domain) PullDSCOOrders(ctx integration.TaskContext) error {
 				WarehouseID:    getDSCOWarehouseCode(order),
 				Shipment:       getDSCOShippingServiceLevelCode(order),
 			}
+			// 4) Upsert：允许覆盖更新（初始化补数据、人工纠错）
 			if err := d.orderStore.Upsert(taskCtx, row); err != nil {
 				logger.Warn(taskCtx, "upsert dsco_order_sync failed", "err", err)
 				continue
