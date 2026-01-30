@@ -311,7 +311,7 @@ func (s *Server) apiExportOrders(c *gin.Context) {
 	defer tmp.Close()
 
 	w := csv.NewWriter(tmp)
-	_ = w.Write([]string{"id", "po_number", "dsco_create_time", "status", "warehouse_id", "shipment", "shipped_tracking_no", "dsco_invoice_id"})
+	_ = w.Write([]string{"id", "po_number", "dsco_create_time", "dsco_status", "dsco_retailer_id", "status", "warehouse_id", "shipment", "shipped_tracking_no", "dsco_invoice_id"})
 
 	offset := 0
 	for {
@@ -326,6 +326,8 @@ func (s *Server) apiExportOrders(c *gin.Context) {
 				strconv.FormatInt(it.ID, 10),
 				it.PONumber,
 				strconv.FormatInt(it.DSCOCreateTime, 10),
+				it.DSCOStatus,
+				it.DSCOREtailerID,
 				strconv.FormatInt(int64(it.Status), 10),
 				it.WarehouseID,
 				it.Shipment,

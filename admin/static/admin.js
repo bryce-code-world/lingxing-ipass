@@ -259,7 +259,7 @@ async function adminLoadOrders(offset) {
     tbody.innerHTML = "";
     for (const it of (data.items || [])) {
       const tr = document.createElement("tr");
-      tr.innerHTML = `<td>${it.id}</td><td><code>${it.po_number}</code></td><td title="${it.dsco_create_time}">${fmtUnixSec(it.dsco_create_time)}</td><td>${it.status}</td><td>${it.warehouse_id}</td><td>${it.shipment}</td><td>${it.dsco_retailer_id || ""}</td><td>${it.shipped_tracking_no}</td><td>${it.dsco_invoice_id}</td>`;
+      tr.innerHTML = `<td>${it.id}</td><td><code>${it.po_number}</code></td><td title="${it.dsco_create_time}">${fmtUnixSec(it.dsco_create_time)}</td><td>${it.dsco_status || ""}</td><td>${it.status}</td><td>${it.warehouse_id}</td><td>${it.shipment}</td><td>${it.dsco_retailer_id || ""}</td><td>${it.shipped_tracking_no}</td><td>${it.dsco_invoice_id}</td>`;
       tbody.appendChild(tr);
     }
     showToast("Orders: OK");

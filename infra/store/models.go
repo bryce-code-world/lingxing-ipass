@@ -16,6 +16,7 @@ type DSCOOrderSyncRow struct {
 	PONumber          string          `gorm:"column:po_number"`
 	DSCOCreateTime    int64           `gorm:"column:dsco_create_time"`
 	DSCOREtailerID    string          `gorm:"column:dsco_retailer_id"`
+	DSCOStatus        string          `gorm:"column:dsco_status"`
 	Status            int16           `gorm:"column:status"`
 	Payload           json.RawMessage `gorm:"column:payload"`
 	MSKUs             []string        `gorm:"column:mskus;type:text[]"`

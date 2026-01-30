@@ -3,6 +3,7 @@ package dsco_lingxing
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"example.com/lingxing/golib/v2/sdk/dsco"
@@ -136,6 +137,7 @@ func (d *Domain) PullDSCOOrders(ctx integration.TaskContext) error {
 				PONumber:       order.PoNumber,
 				DSCOCreateTime: createUnix,
 				DSCOREtailerID: derefString(order.DscoRetailerID),
+				DSCOStatus:     strings.TrimSpace(order.DscoStatus),
 				Status:         status,
 				Payload:        json.RawMessage(raw),
 				MSKUs:          mskus,
