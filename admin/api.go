@@ -165,6 +165,10 @@ func (s *Server) apiListOrders(c *gin.Context) {
 		PONumberLike:   c.Query("po_number"),
 		DSCOREtailerID: c.Query("dsco_retailer_id"),
 		MSKU:           c.Query("msku"),
+		WarehouseID:    c.Query("warehouse_id"),
+		Shipment:       c.Query("shipment"),
+		Tracking:       c.Query("tracking"),
+		InvoiceID:      c.Query("invoice_id"),
 	}
 	if v := c.Query("start"); v != "" {
 		if n, err := strconv.ParseInt(v, 10, 64); err == nil {

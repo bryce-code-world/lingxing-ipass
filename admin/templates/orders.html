@@ -2,10 +2,12 @@
   {{ template "layout_head" . }}
   <h1 class="h1">DSCO Order Sync</h1>
   <div class="card">
-    <div class="row wrap filters">
+    <div class="filters-grid" id="ordersFilters">
       <input class="input sm" id="qPo" placeholder="po_number like" />
       <input class="input sm" id="qRetailer" placeholder="dsco_retailer_id" />
       <input class="input sm" id="qMSKU" placeholder="msku" />
+      <input class="input sm" id="qWarehouse" placeholder="warehouse_id" />
+      <input class="input sm" id="qShipment" placeholder="shipment" />
       <select class="select sm" id="qDscoStatus">
         <option value="">dsco_status (all)</option>
         <option value="created">created</option>
@@ -13,6 +15,9 @@
         <option value="shipped">shipped</option>
         <option value="cancelled">cancelled</option>
       </select>
+
+      <input class="input sm" id="qTracking" placeholder="tracking" />
+      <input class="input sm" id="qInvoice" placeholder="invoice_id" />
       <input class="input sm" id="qStatus" placeholder="status (e.g. 1,2,3)" />
       <input class="input sm" id="qStartDT" type="datetime-local" />
       <input class="input sm" id="qEndDT" type="datetime-local" />
@@ -22,8 +27,11 @@
         <option value="100">100 / page</option>
         <option value="200">200 / page</option>
       </select>
-      <button class="btn" onclick="adminLoadOrders(0)">Search</button>
-      <button class="btn" onclick="adminExportOrders()">Export CSV</button>
+
+      <div class="filters-actions">
+        <button class="btn" onclick="adminLoadOrders(0)">Search</button>
+        <button class="btn" onclick="adminExportOrders()">Export CSV</button>
+      </div>
     </div>
     <div class="muted" style="margin-top: 8px;">时间按 <code id="tzLabel"></code> 显示；筛选输入按该时区解释；end 为开区间。</div>
   </div>

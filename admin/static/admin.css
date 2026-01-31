@@ -238,6 +238,25 @@ body {
   flex: 0 0 auto;
 }
 
+.filters-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px;
+  align-items: end;
+}
+.filters-grid .input.sm,
+.filters-grid .select.sm {
+  width: 100%;
+  min-width: 0;
+}
+.filters-grid .filters-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
 @media (max-width: 900px) {
   .grid { grid-template-columns: 1fr; }
   .grid2 { grid-template-columns: 1fr; }

@@ -32,16 +32,21 @@ func toPGTextArrayLiteral(items []string) string {
 }
 
 type DSCOOrderSyncListFilter struct {
-	StartTime      *int64
-	EndTime        *int64
-	StatusIn       []int16
-	DSCOStatus     string
-	PONumberLike   string
-	DSCOREtailerID string
-	MSKU           string // filter: sku = ANY(mskus)
+	StartTime      *int64  `json:"startTime"`
+	EndTime        *int64  `json:"endTime"`
+	StatusIn       []int16 `json:"statusIn"`
+	DSCOStatus     string  `json:"dscoStatus"`
+	PONumberLike   string  `json:"poNumberLike"`
+	DSCOREtailerID string  `json:"dscoRetailerId"`
+	MSKU           string  `json:"msku"` // filter: sku = ANY(mskus)
 
-	Offset int
-	Limit  int
+	WarehouseID string `json:"warehouseId"`
+	Shipment    string `json:"shipment"`
+	Tracking    string `json:"tracking"`
+	InvoiceID   string `json:"invoiceId"`
+
+	Offset int `json:"offset"`
+	Limit  int `json:"limit"`
 }
 
 func (s *DSCOOrderSyncStore) Upsert(ctx context.Context, row DSCOOrderSyncRow) error {
@@ -119,6 +124,18 @@ func (s *DSCOOrderSyncStore) List(ctx context.Context, f DSCOOrderSyncListFilter
 	}
 	if strings.TrimSpace(f.MSKU) != "" {
 		q = q.Where("? = ANY(mskus)", strings.TrimSpace(f.MSKU))
+	}
+	if strings.TrimSpace(f.WarehouseID) != "" {
+		q = q.Where("warehouse_id = ?", strings.TrimSpace(f.WarehouseID))
+	}
+	if strings.TrimSpace(f.Shipment) != "" {
+		q = q.Where("shipment = ?", strings.TrimSpace(f.Shipment))
+	}
+	if strings.TrimSpace(f.Tracking) != "" {
+		q = q.Where("shipped_tracking_no = ?", strings.TrimSpace(f.Tracking))
+	}
+	if strings.TrimSpace(f.InvoiceID) != "" {
+		q = q.Where("dsco_invoice_id = ?", strings.TrimSpace(f.InvoiceID))
 	}
 
 	var total int64

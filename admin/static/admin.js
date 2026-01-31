@@ -333,6 +333,10 @@ function ordersFilter() {
   set("po_number", (qs("qPo")?.value || "").trim());
   set("dsco_retailer_id", (qs("qRetailer")?.value || "").trim());
   set("msku", (qs("qMSKU")?.value || "").trim());
+  set("warehouse_id", (qs("qWarehouse")?.value || "").trim());
+  set("shipment", (qs("qShipment")?.value || "").trim());
+  set("tracking", (qs("qTracking")?.value || "").trim());
+  set("invoice_id", (qs("qInvoice")?.value || "").trim());
   set("dsco_status", (qs("qDscoStatus")?.value || "").trim());
   set("status", (qs("qStatus")?.value || "").trim());
   const s = parseDateTimeLocal(qs("qStartDT")?.value || "");
@@ -385,6 +389,10 @@ async function adminExportOrders() {
     if (f.po_number) body.poNumberLike = f.po_number;
     if (f.dsco_retailer_id) body.dscoRetailerId = f.dsco_retailer_id;
     if (f.msku) body.msku = f.msku;
+    if (f.warehouse_id) body.warehouseId = f.warehouse_id;
+    if (f.shipment) body.shipment = f.shipment;
+    if (f.tracking) body.tracking = f.tracking;
+    if (f.invoice_id) body.invoiceId = f.invoice_id;
     await apiDownload("/admin/api/export/dsco_order_sync", body, "dsco_order_sync.csv");
     showToast("Export: OK");
   } catch (e) {
