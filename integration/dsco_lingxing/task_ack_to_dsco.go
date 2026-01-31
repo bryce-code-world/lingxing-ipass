@@ -9,6 +9,7 @@ import (
 	"example.com/lingxing/golib/v2/sdk/lingxing"
 	"example.com/lingxing/golib/v2/tool/logger"
 
+	"lingxingipass/infra/store"
 	"lingxingipass/integration"
 )
 
@@ -61,7 +62,13 @@ func (d *Domain) AckToDSCO(ctx integration.TaskContext) (retErr error) {
 	}()
 
 	// 1) 取待 ACK（status=2）
-	items, err := d.orderStore.FindByStatus(taskCtx, 2, ctx.Size)
+	var items []store.DSCOOrderSyncRow
+	var err error
+	if strings.TrimSpace(ctx.OnlyPONumber) != "" {
+		items, err = d.orderStore.FindByStatusAndPONumber(taskCtx, 2, ctx.OnlyPONumber)
+	} else {
+		items, err = d.orderStore.FindByStatus(taskCtx, 2, ctx.Size)
+	}
 	if err != nil {
 		retErr = err
 		return retErr

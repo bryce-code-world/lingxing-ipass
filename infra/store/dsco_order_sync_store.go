@@ -163,9 +163,38 @@ func (s *DSCOOrderSyncStore) FindByStatus(ctx context.Context, status int16, lim
 	return items, err
 }
 
+func (s *DSCOOrderSyncStore) FindByStatusAndPONumber(ctx context.Context, status int16, poNumber string) ([]DSCOOrderSyncRow, error) {
+	po := strings.TrimSpace(poNumber)
+	if po == "" {
+		return nil, errors.New("po_number 不能为空")
+	}
+	var items []DSCOOrderSyncRow
+	err := s.db.WithContext(ctx).
+		Where("status = ? AND po_number = ?", status, po).
+		Limit(1).
+		Find(&items).Error
+	return items, err
+}
+
 func (s *DSCOOrderSyncStore) GetByID(ctx context.Context, id int64) (DSCOOrderSyncRow, bool, error) {
 	var row DSCOOrderSyncRow
 	err := s.db.WithContext(ctx).Where("id = ?", id).Take(&row).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return DSCOOrderSyncRow{}, false, nil
+		}
+		return DSCOOrderSyncRow{}, false, err
+	}
+	return row, true, nil
+}
+
+func (s *DSCOOrderSyncStore) GetByPONumber(ctx context.Context, poNumber string) (DSCOOrderSyncRow, bool, error) {
+	po := strings.TrimSpace(poNumber)
+	if po == "" {
+		return DSCOOrderSyncRow{}, false, errors.New("po_number 不能为空")
+	}
+	var row DSCOOrderSyncRow
+	err := s.db.WithContext(ctx).Where("po_number = ?", po).Take(&row).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return DSCOOrderSyncRow{}, false, nil

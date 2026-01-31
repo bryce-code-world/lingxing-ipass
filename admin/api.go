@@ -236,6 +236,76 @@ func (s *Server) apiUpdateOrderStatus(c *gin.Context) {
 	ok(c, map[string]any{"ok": true})
 }
 
+func (s *Server) apiRunOneOrderByStatus(c *gin.Context) {
+	var body struct {
+		PONumber string `json:"po_number"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil || strings.TrimSpace(body.PONumber) == "" {
+		fail(c, http.StatusBadRequest, 400, "missing po_number")
+		return
+	}
+	po := strings.TrimSpace(body.PONumber)
+
+	before, okk, err := s.orderStore.GetByPONumber(c.Request.Context(), po)
+	if err != nil {
+		fail(c, http.StatusInternalServerError, 500, err.Error())
+		return
+	}
+	if !okk {
+		fail(c, http.StatusNotFound, 404, "order not found")
+		return
+	}
+
+	// status=5/6（已完成/取消）禁用手动执行。
+	if before.Status == 5 || before.Status == 6 {
+		fail(c, http.StatusBadRequest, 400, "status not runnable")
+		return
+	}
+
+	var job runtimecfg.JobName
+	switch before.Status {
+	case 1:
+		job = runtimecfg.JobPushToLingXing
+	case 2:
+		job = runtimecfg.JobAckToDSCO
+	case 3:
+		job = runtimecfg.JobShipToDSCO
+	case 4:
+		job = runtimecfg.JobInvoiceToDSCO
+	default:
+		fail(c, http.StatusBadRequest, 400, "unsupported status")
+		return
+	}
+
+	err = s.runner.Run(c.Request.Context(), integration.RunRequest{
+		Domain:       runtimecfg.DomainDSCOLingXing,
+		Job:          job,
+		Trigger:      integration.TriggerManual,
+		Size:         1,
+		OnlyPONumber: po,
+	})
+	if err != nil {
+		if errors.Is(err, integration.ErrJobRunning) {
+			fail(c, http.StatusConflict, 409, "job running")
+			return
+		}
+		fail(c, http.StatusBadRequest, 400, err.Error())
+		return
+	}
+
+	afterStatus := before.Status
+	if after, okk, err := s.orderStore.GetByPONumber(c.Request.Context(), po); err == nil && okk {
+		afterStatus = after.Status
+	}
+	ok(c, map[string]any{
+		"po_number":      po,
+		"job":            job,
+		"status_before":  before.Status,
+		"status_after":   afterStatus,
+		"status_changed": afterStatus != before.Status,
+	})
+}
+
 func (s *Server) apiOrderDetail(c *gin.Context) {
 	type orderDetail struct {
 		ID                int64           `json:"id"`

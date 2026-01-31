@@ -2,6 +2,7 @@ package integration
 
 import (
 	"context"
+	"strings"
 
 	"lingxingipass/infra/runtimecfg"
 )
@@ -19,6 +20,10 @@ type RunRequest struct {
 	Trigger Trigger
 	Size    int
 
+	// OnlyPONumber 非空时表示“只处理这一单”，任务取数必须按该 po_number 精确过滤。
+	// 用于 Admin 手动触发单订单执行，不影响 scheduler 的批处理语义。
+	OnlyPONumber string
+
 	// Override is reserved for future manual parameters (e.g., pull range).
 	Override any
 }
@@ -33,6 +38,9 @@ type TaskContext struct {
 	Trigger Trigger
 	Size    int
 
+	// OnlyPONumber 非空时表示“只处理这一单”，任务取数必须按该 po_number 精确过滤。
+	OnlyPONumber string
+
 	// RunID 本次任务执行的唯一标识（由 Runner 生成），用于把同一轮任务的明细日志串起来。
 	RunID string
 
@@ -44,11 +52,15 @@ type TaskContext struct {
 
 // BaseLogFields 返回本次任务的公共日志字段（用于所有明细日志）。
 func (tc TaskContext) BaseLogFields() []any {
-	return []any{
+	fields := []any{
 		"run_id", tc.RunID,
 		"domain", tc.Domain,
 		"job", string(tc.Job),
 		"trigger", string(tc.Trigger),
 		"size", tc.Size,
 	}
+	if strings.TrimSpace(tc.OnlyPONumber) != "" {
+		fields = append(fields, "only_po_number", tc.OnlyPONumber)
+	}
+	return fields
 }

@@ -80,24 +80,27 @@ func (r *Runner) Run(ctx context.Context, req RunRequest) error {
 		"job", string(req.Job),
 		"trigger", string(req.Trigger),
 		"size", size,
+		"only_po_number", req.OnlyPONumber,
 		"cfg_updated_at", rc.UpdatedAt,
 	)
 
 	err = task(TaskContext{
-		Ctx:      ctx,
-		Domain:   req.Domain,
-		Job:      req.Job,
-		Trigger:  req.Trigger,
-		Size:     size,
-		RunID:    runID,
-		Config:   rc.Config,
-		Override: req.Override,
+		Ctx:          ctx,
+		Domain:       req.Domain,
+		Job:          req.Job,
+		Trigger:      req.Trigger,
+		Size:         size,
+		OnlyPONumber: req.OnlyPONumber,
+		RunID:        runID,
+		Config:       rc.Config,
+		Override:     req.Override,
 	})
 	if err != nil {
 		logger.Error(ctx, "job failed",
 			"run_id", runID,
 			"domain", req.Domain,
 			"job", string(req.Job),
+			"only_po_number", req.OnlyPONumber,
 			"duration_ms", time.Since(startedAt).Milliseconds(),
 			"err", err,
 		)
@@ -107,6 +110,7 @@ func (r *Runner) Run(ctx context.Context, req RunRequest) error {
 		"run_id", runID,
 		"domain", req.Domain,
 		"job", string(req.Job),
+		"only_po_number", req.OnlyPONumber,
 		"duration_ms", time.Since(startedAt).Milliseconds(),
 	)
 	return nil

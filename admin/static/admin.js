@@ -365,7 +365,11 @@ async function adminLoadOrders(offset) {
       const skuText = skus.join(", ");
       const skuShow = skuText.length > 40 ? (skuText.slice(0, 40) + "...") : skuText;
       const tr = document.createElement("tr");
-      tr.innerHTML = `<td>${it.id}</td><td><code>${it.po_number}</code></td><td title="${it.dsco_create_time}">${fmtUnixSec(it.dsco_create_time)}</td><td>${it.dsco_status || ""}</td><td>${it.status}</td><td>${it.warehouse_id}</td><td>${it.shipment}</td><td>${it.dsco_retailer_id || ""}</td><td title="${skuText.replace(/\"/g, '&quot;')}"><code>${skuShow}</code></td><td>${it.shipped_tracking_no}</td><td>${it.dsco_invoice_id}</td><td><button class="btn" onclick="adminViewOrderDetail(${it.id})">View</button> <button class="btn" onclick='adminOpenEditOrderStatus(${poJSON}, ${it.status})'>Edit</button></td>`;
+      const canRun = Number(it.status) >= 1 && Number(it.status) <= 4;
+      const runBtn = canRun
+        ? `<button class="btn" onclick='adminRunOneOrderByStatus(${poJSON}, ${it.status})'>Run</button>`
+        : `<button class="btn" disabled title="status=5/6 disabled">Run</button>`;
+      tr.innerHTML = `<td>${it.id}</td><td><code>${it.po_number}</code></td><td title="${it.dsco_create_time}">${fmtUnixSec(it.dsco_create_time)}</td><td>${it.dsco_status || ""}</td><td>${it.status}</td><td>${it.warehouse_id}</td><td>${it.shipment}</td><td>${it.dsco_retailer_id || ""}</td><td title="${skuText.replace(/\"/g, '&quot;')}"><code>${skuShow}</code></td><td>${it.shipped_tracking_no}</td><td>${it.dsco_invoice_id}</td><td><button class="btn" onclick="adminViewOrderDetail(${it.id})">View</button> ${runBtn} <button class="btn" onclick='adminOpenEditOrderStatus(${poJSON}, ${it.status})'>Edit</button></td>`;
       tbody.appendChild(tr);
     }
   } catch (e) {
@@ -438,6 +442,43 @@ function statusLabel(status) {
     case 5: return "5 完成（已回传发票）";
     case 6: return "6 已取消";
     default: return String(status);
+  }
+}
+
+function jobForOrderStatus(status) {
+  switch (Number(status)) {
+    case 1: return "push_to_lingxing";
+    case 2: return "ack_to_dsco";
+    case 3: return "ship_to_dsco";
+    case 4: return "invoice_to_dsco";
+    default: return "";
+  }
+}
+
+async function adminRunOneOrderByStatus(poNumber, currentStatus) {
+  const po = String(poNumber || "").trim();
+  if (!po) return showToast("missing po_number");
+
+  const st = Number(currentStatus);
+  const job = jobForOrderStatus(st);
+  if (!job) return showToast("Run: unsupported status=" + st);
+  if (st === 5 || st === 6) return showToast("Run: disabled for status=" + st);
+
+  if (!confirm(`Run ${job} for ${po} ?`)) return;
+
+  try {
+    const data = await apiJSON("POST", "/admin/api/dsco_order_sync/run_one", { po_number: po });
+    const b = Number(data.status_before);
+    const a = Number(data.status_after);
+    const changed = !!data.status_changed;
+    if (changed) {
+      showToast(`Run: OK (${data.job}) ${b} -> ${a}`, "ok");
+    } else {
+      showToast(`Run: OK (${data.job}) status unchanged (${b})`, "ok");
+    }
+    await adminLoadOrders(ordersOffset);
+  } catch (e) {
+    showToast("Run: " + e.message);
   }
 }
 
