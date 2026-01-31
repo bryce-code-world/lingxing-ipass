@@ -44,14 +44,14 @@ func TestOrderService_CreateOrdersV2(t *testing.T) {
 func TestOrderService_ListOrdersV2(t *testing.T) {
 	cli := newClient(t)
 	out, res, err := cli.Order.ListOrdersV2WithRawBody(context.Background(), lingxing.OrderListV2Request{
-		PlatformCode:     []lingxing.PlatformCode{lingxing.PlatformCodeCustom}, // 自定义平台
-		StoreID:          []string{"110658143132021760"},                       // Chewy 店铺ID
-		Offset:           0,
-		Length:           20,
-		DateType:         lingxing.MultiPlatformOrderDateTypeUpdateTime,
-		StartTime:        1769304406,
-		EndTime:          1769650006,
-		PlatformOrderNos: []string{"HHX124S5EIPXTY0TSRR5X6"},
+		PlatformCode: []lingxing.PlatformCode{lingxing.PlatformCodeCustom}, // 自定义平台
+		StoreID:      []string{"110658143132021760"},                       // Chewy 店铺ID
+		Offset:       0,
+		Length:       20,
+		// DateType:         lingxing.MultiPlatformOrderDateTypeUpdateTime,
+		// StartTime:        1769304406,
+		// EndTime:          1769650006,
+		PlatformOrderNos: []string{"6ECM5T57UBS9CV6WDWNX"},
 	})
 	if err != nil {
 		t.Fatalf("ListOrdersV2() err=%v", err)
