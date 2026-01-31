@@ -42,25 +42,27 @@
       <div class="spacer"></div>
       <div class="muted" id="ordersMeta"></div>
     </div>
-    <table class="table" id="ordersTable">
-      <thead>
-        <tr>
-          <th>id</th>
-          <th>po_number</th>
-          <th>dsco_create_time</th>
-          <th>dsco_status</th>
-          <th>status</th>
-          <th>warehouse_id</th>
-          <th>shipment</th>
-          <th>dsco_retailer_id</th>
-          <th>sku</th>
-          <th>tracking</th>
-          <th>invoice_id</th>
-          <th>actions</th>
-        </tr>
-      </thead>
-      <tbody></tbody>
-    </table>
+    <div class="table-wrap">
+      <table class="table table-tight" id="ordersTable">
+        <thead>
+          <tr>
+            <th>id</th>
+            <th>po_number</th>
+            <th>dsco_create_time</th>
+            <th>dsco_status</th>
+            <th>status</th>
+            <th>warehouse_id</th>
+            <th>shipment</th>
+            <th>dsco_retailer_id</th>
+            <th>sku</th>
+            <th>tracking</th>
+            <th>invoice_id</th>
+            <th>actions</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
     <div class="row" style="margin-top: 12px;">
       <button class="btn" onclick="adminPrevOrders()">Prev</button>
       <button class="btn" onclick="adminNextOrders()">Next</button>

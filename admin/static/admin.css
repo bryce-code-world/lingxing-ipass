@@ -40,7 +40,7 @@ body {
 .link:hover { opacity: 1; }
 
 .container {
-  max-width: 1200px;
+  max-width: 1600px;
   margin: 18px auto;
   padding: 0 18px 28px;
 }
@@ -127,14 +127,44 @@ body {
   margin-top: 10px;
   font-size: 13px;
 }
+.table-wrap {
+  margin-top: 10px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+}
+.table-wrap .table { margin-top: 0; }
+
 .table th, .table td {
   border-bottom: 1px solid var(--border);
   padding: 10px 8px;
   text-align: left;
   vertical-align: top;
 }
+.table.table-tight th, .table.table-tight td { padding: 9px 8px; }
 .table th { color: var(--muted); font-weight: 600; }
 .table code { font-size: 12px; }
+
+/* Orders 列表：优先横向滚动，避免挤压导致跨行 */
+#ordersTable { min-width: 1400px; }
+#ordersTable th, #ordersTable td { white-space: nowrap; vertical-align: middle; }
+#ordersTable td:nth-child(9) { /* sku */
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: nowrap;
+}
+.actions .btn {
+  padding: 6px 10px;
+  font-size: 12px;
+  border-radius: 10px;
+}
 
 .codeblock {
   background: rgba(0,0,0,0.04);
