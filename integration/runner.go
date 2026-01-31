@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	"example.com/lingxing/golib/v2/tool/logger"
 	"gorm.io/gorm"
@@ -39,6 +40,9 @@ func NewRunner(cfgMgr *runtimecfg.Manager, reg *Registry, gdb *gorm.DB) *Runner 
 }
 
 func (r *Runner) Run(ctx context.Context, req RunRequest) error {
+	startedAt := time.Now().UTC()
+	runID := fmt.Sprintf("%d", startedAt.UnixNano())
+
 	task, ok := r.reg.Get(req.Job)
 	if !ok {
 		return ErrJobNotFound
@@ -71,6 +75,7 @@ func (r *Runner) Run(ctx context.Context, req RunRequest) error {
 	defer func() { _ = r.locks.Unlock(context.Background(), conn, lockKey) }()
 
 	logger.Info(ctx, "job start",
+		"run_id", runID,
 		"domain", req.Domain,
 		"job", string(req.Job),
 		"trigger", string(req.Trigger),
@@ -84,20 +89,25 @@ func (r *Runner) Run(ctx context.Context, req RunRequest) error {
 		Job:      req.Job,
 		Trigger:  req.Trigger,
 		Size:     size,
+		RunID:    runID,
 		Config:   rc.Config,
 		Override: req.Override,
 	})
 	if err != nil {
 		logger.Error(ctx, "job failed",
+			"run_id", runID,
 			"domain", req.Domain,
 			"job", string(req.Job),
+			"duration_ms", time.Since(startedAt).Milliseconds(),
 			"err", err,
 		)
 		return err
 	}
 	logger.Info(ctx, "job ok",
+		"run_id", runID,
 		"domain", req.Domain,
 		"job", string(req.Job),
+		"duration_ms", time.Since(startedAt).Milliseconds(),
 	)
 	return nil
 }

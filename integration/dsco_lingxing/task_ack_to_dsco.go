@@ -3,6 +3,7 @@ package dsco_lingxing
 import (
 	"context"
 	"strings"
+	"time"
 
 	"example.com/lingxing/golib/v2/sdk/dsco"
 	"example.com/lingxing/golib/v2/sdk/lingxing"
@@ -24,29 +25,69 @@ import (
 //     - 其他状态：才考虑继续走 ACK。
 //  2. 对“仍需 ACK”的订单，再查领星订单状态（5/6 才允许 ACK），避免过早 ACK。
 //  3. 将需要 ACK 的订单组装为 DSCO Acknowledge 批量请求，调用 /order/acknowledge。
-func (d *Domain) AckToDSCO(ctx integration.TaskContext) error {
+func (d *Domain) AckToDSCO(ctx integration.TaskContext) (retErr error) {
 	taskCtx := ctx.Ctx
 	if taskCtx == nil {
 		taskCtx = context.Background()
 	}
 
+	startedAt := time.Now().UTC()
+	base := ctx.BaseLogFields()
+	logger.Info(taskCtx, "task begin", append(base, "task", "ack_to_dsco")...)
+
+	var (
+		total    int
+		okCount  int
+		skip     int
+		fail     int
+		advanced int
+	)
+	defer func() {
+		fields := append(base,
+			"task", "ack_to_dsco",
+			"duration_ms", time.Since(startedAt).Milliseconds(),
+			"total", total,
+			"ok", okCount,
+			"skip", skip,
+			"fail", fail,
+			"advanced", advanced,
+		)
+		if retErr != nil {
+			logger.Error(taskCtx, "task end", append(fields, "result", "failed", "err", retErr)...)
+			return
+		}
+		logger.Info(taskCtx, "task end", append(fields, "result", "ok")...)
+	}()
+
 	// 1) 取待 ACK（status=2）
 	items, err := d.orderStore.FindByStatus(taskCtx, 2, ctx.Size)
 	if err != nil {
-		return err
+		retErr = err
+		return retErr
 	}
 	if len(items) == 0 {
 		return nil
+	}
+	total = len(items)
+
+	// 任务明细日志需要用到“本地保存的 DSCO 原始订单 payload”。
+	payloadByPO := make(map[string][]byte, len(items))
+	for _, it := range items {
+		if po := strings.TrimSpace(it.PONumber); po != "" {
+			payloadByPO[po] = it.Payload
+		}
 	}
 
 	// 2) 初始化客户端：DSCO + 领星
 	dscoCli, err := d.dscoClient()
 	if err != nil {
-		return err
+		retErr = err
+		return retErr
 	}
 	lx, err := d.lingxingClient(taskCtx)
 	if err != nil {
-		return err
+		retErr = err
+		return retErr
 	}
 
 	// 3) 先查 DSCO 订单状态（避免重复 ACK）：
@@ -55,11 +96,27 @@ func (d *Domain) AckToDSCO(ctx integration.TaskContext) error {
 		poNumbers = append(poNumbers, it.PONumber)
 	}
 	dscoByPO := fetchDSCOOrdersByPONumbers(taskCtx, dscoCli, poNumbers, 5)
+	logger.Info(taskCtx, "dsco orders fetched",
+		append(base,
+			"task", "ack_to_dsco",
+			"po_count", len(uniqueNonEmptyStrings(poNumbers)),
+			"fetched", len(dscoByPO),
+		)...,
+	)
 
 	needAck := make([]string, 0, len(items))
 	for _, row := range items {
 		po := strings.TrimSpace(row.PONumber)
 		if po == "" {
+			skip++
+			logger.Info(taskCtx, "order done",
+				append(base,
+					"task", "ack_to_dsco",
+					"po_number", "",
+					"result", "skip",
+					"reason", "po_number_empty",
+				)...,
+			)
 			continue
 		}
 
@@ -67,7 +124,34 @@ func (d *Domain) AckToDSCO(ctx integration.TaskContext) error {
 			st := strings.TrimSpace(o.DscoStatus)
 			// shipment_pending：已确认（等待发货）；shipped/completed：已进入更后阶段。
 			if st == "shipment_pending" || st == "shipped" || st == "completed" {
-				_ = d.orderStore.UpdateStatusAndFields(taskCtx, po, 3, "", "")
+				if uerr := d.orderStore.UpdateStatusAndFields(taskCtx, po, 3, "", ""); uerr != nil {
+					fail++
+					logger.Warn(taskCtx, "order done",
+						append(base,
+							"task", "ack_to_dsco",
+							"po_number", po,
+							"result", "fail",
+							"reason", "update_local_status_failed",
+							"dsco_status", st,
+							"dsco_raw", integration.JSONForLog(o),
+							"err", uerr,
+						)...,
+					)
+					continue
+				}
+				skip++
+				advanced++
+				logger.Info(taskCtx, "order done",
+					append(base,
+						"task", "ack_to_dsco",
+						"po_number", po,
+						"result", "skip",
+						"reason", "dsco_status_already_confirmed_or_later",
+						"dsco_status", st,
+						"dsco_raw", integration.JSONForLog(o),
+						"new_status", 3,
+					)...,
+				)
 				continue
 			}
 		}
@@ -113,9 +197,31 @@ func (d *Domain) AckToDSCO(ctx integration.TaskContext) error {
 	for _, po := range needAck {
 		detail, ok := detailsByPO[po]
 		if !ok {
+			skip++
+			logger.Info(taskCtx, "order done",
+				append(base,
+					"task", "ack_to_dsco",
+					"po_number", po,
+					"result", "skip",
+					"reason", "lingxing_order_not_found",
+					"dsco_payload", integration.JSONForLog(payloadByPO[po]),
+				)...,
+			)
 			continue
 		}
 		if detail.Status != lingxing.MultiPlatformOrderStatusPendingShipment && detail.Status != lingxing.MultiPlatformOrderStatusShipped {
+			skip++
+			logger.Info(taskCtx, "order done",
+				append(base,
+					"task", "ack_to_dsco",
+					"po_number", po,
+					"result", "skip",
+					"reason", "lingxing_status_not_ready_for_ack",
+					"lingxing_status", int(detail.Status),
+					"lingxing_raw", integration.JSONForLog(detail),
+					"dsco_payload", integration.JSONForLog(payloadByPO[po]),
+				)...,
+			)
 			continue
 		}
 		reqs = append(reqs, dsco.OrderAcknowledgeRequest{ID: po, Type: dsco.OrderAcknowledgeIDTypePoNumber})
@@ -126,13 +232,62 @@ func (d *Domain) AckToDSCO(ctx integration.TaskContext) error {
 	}
 
 	// 6) 调用 DSCO ACK 批量接口
+	logger.Info(taskCtx, "dsco acknowledge request",
+		append(base,
+			"task", "ack_to_dsco",
+			"count", len(reqs),
+			"reqs", integration.JSONForLog(reqs),
+		)...,
+	)
 	if _, err := dscoCli.Order.Acknowledge(taskCtx, reqs); err != nil {
-		return err
+		retErr = err
+		logger.Error(taskCtx, "dsco acknowledge failed",
+			append(base,
+				"task", "ack_to_dsco",
+				"reqs", integration.JSONForLog(reqs),
+				"err", err,
+			)...,
+		)
+		return retErr
 	}
 
 	// 7) 回传成功：推进状态到 3
 	for _, po := range toUpdate {
-		_ = d.orderStore.UpdateStatusAndFields(taskCtx, po, 3, "", "")
+		if uerr := d.orderStore.UpdateStatusAndFields(taskCtx, po, 3, "", ""); uerr != nil {
+			fail++
+			logger.Warn(taskCtx, "order done",
+				append(base,
+					"task", "ack_to_dsco",
+					"po_number", po,
+					"result", "fail",
+					"reason", "update_local_status_failed_after_ack",
+					"err", uerr,
+				)...,
+			)
+			continue
+		}
+		okCount++
+		detail := detailsByPO[po]
+		dscoSt := ""
+		dscoRaw := ""
+		if o, ok := dscoByPO[po]; ok {
+			dscoSt = strings.TrimSpace(o.DscoStatus)
+			dscoRaw = integration.JSONForLog(o)
+		}
+		logger.Info(taskCtx, "order done",
+			append(base,
+				"task", "ack_to_dsco",
+				"po_number", po,
+				"result", "ok",
+				"reason", "dsco_ack_sent",
+				"dsco_status", dscoSt,
+				"dsco_raw", dscoRaw,
+				"dsco_payload", integration.JSONForLog(payloadByPO[po]),
+				"lingxing_status", int(detail.Status),
+				"lingxing_raw", integration.JSONForLog(detail),
+				"new_status", 3,
+			)...,
+		)
 	}
 	return nil
 }

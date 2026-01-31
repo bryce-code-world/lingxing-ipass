@@ -27,25 +27,43 @@ import (
 // 关键点：
 // - 映射匹配不到一律跳过（warehouseCode/WID 为空直接跳过；SKU 为空直接跳过）。
 // - 一期不并发；失败仅日志，等待下次定时任务重试。
-func (d *Domain) SyncStock(ctx integration.TaskContext) error {
+func (d *Domain) SyncStock(ctx integration.TaskContext) (retErr error) {
 	taskCtx := ctx.Ctx
 	if taskCtx == nil {
 		taskCtx = context.Background()
 	}
 
+	startedAt := time.Now().UTC()
+	base := ctx.BaseLogFields()
+	logger.Info(taskCtx, "task begin", append(base, "task", "sync_stock")...)
+	defer func() {
+		fields := append(base,
+			"task", "sync_stock",
+			"duration_ms", time.Since(startedAt).Milliseconds(),
+		)
+		if retErr != nil {
+			logger.Error(taskCtx, "task end", append(fields, "result", "failed", "err", retErr)...)
+			return
+		}
+		logger.Info(taskCtx, "task end", append(fields, "result", "ok")...)
+	}()
+
 	reverseSKU, err := buildReverseSKUMap(ctx.Config)
 	if err != nil {
-		return err
+		retErr = err
+		return retErr
 	}
 
 	// 初始化客户端：领星 + DSCO
 	lx, err := d.lingxingClient(taskCtx)
 	if err != nil {
-		return err
+		retErr = err
+		return retErr
 	}
 	dscoCli, err := d.dscoClient()
 	if err != nil {
-		return err
+		retErr = err
+		return retErr
 	}
 
 	// mapping.warehouse: DSCO warehouseCode -> 领星 WID
@@ -56,6 +74,19 @@ func (d *Domain) SyncStock(ctx integration.TaskContext) error {
 			continue
 		}
 
+		warehouseStart := time.Now().UTC()
+		logger.Info(taskCtx, "warehouse sync begin",
+			append(base,
+				"task", "sync_stock",
+				"warehouse_code", dscoWarehouseCode,
+				"wid", wid,
+			)...,
+		)
+
+		var (
+			totalItems int
+			totalInvs  int
+		)
 		offset := 0
 		for {
 			// 分页拉取领星库存明细
@@ -71,6 +102,7 @@ func (d *Domain) SyncStock(ctx integration.TaskContext) error {
 			if len(items) == 0 {
 				break
 			}
+			totalItems += len(items)
 
 			var invs []dsco.ItemInventory
 			for _, it := range items {
@@ -109,6 +141,7 @@ func (d *Domain) SyncStock(ctx integration.TaskContext) error {
 					Reason:               "",
 				})
 			}
+			totalInvs += len(invs)
 
 			if len(invs) > 0 {
 				// 调用 DSCO 批量库存回写接口
@@ -116,6 +149,16 @@ func (d *Domain) SyncStock(ctx integration.TaskContext) error {
 				if err != nil {
 					logger.Warn(taskCtx, "dsco inventory update failed", "warehouse_code", dscoWarehouseCode, "err", err)
 				}
+				logger.Info(taskCtx, "inventory batch sent",
+					append(base,
+						"task", "sync_stock",
+						"warehouse_code", dscoWarehouseCode,
+						"wid", wid,
+						"offset", offset,
+						"count", len(invs),
+						"req", integration.JSONForLog(invs),
+					)...,
+				)
 			}
 
 			offset += len(items)
@@ -127,7 +170,16 @@ func (d *Domain) SyncStock(ctx integration.TaskContext) error {
 			}
 		}
 
-		logger.Info(taskCtx, "sync stock done", "warehouse_code", dscoWarehouseCode, "wid", wid)
+		logger.Info(taskCtx, "warehouse sync end",
+			append(base,
+				"task", "sync_stock",
+				"warehouse_code", dscoWarehouseCode,
+				"wid", wid,
+				"duration_ms", time.Since(warehouseStart).Milliseconds(),
+				"lingxing_items", totalItems,
+				"dsco_invs", totalInvs,
+			)...,
+		)
 	}
 
 	return nil

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
 	"example.com/lingxing/golib/v2/sdk/dsco"
@@ -29,29 +30,59 @@ import (
 //
 // - invoiceDate：优先 DeliveredAt；为空则用 StockDeliveredAt 兜底（已确认）。
 // - invoiceId：一期默认 invoiceId = poNumber；若未来一单多出库单，可切换为 poNumber-序号（已确认）。
-func (d *Domain) InvoiceToDSCO(ctx integration.TaskContext) error {
+func (d *Domain) InvoiceToDSCO(ctx integration.TaskContext) (retErr error) {
 	taskCtx := ctx.Ctx
 	if taskCtx == nil {
 		taskCtx = context.Background()
 	}
 
+	startedAt := time.Now().UTC()
+	base := ctx.BaseLogFields()
+	logger.Info(taskCtx, "task begin", append(base, "task", "invoice_to_dsco")...)
+
+	var (
+		total   int
+		okCount int
+		skip    int
+		fail    int
+	)
+	defer func() {
+		fields := append(base,
+			"task", "invoice_to_dsco",
+			"duration_ms", time.Since(startedAt).Milliseconds(),
+			"total", total,
+			"ok", okCount,
+			"skip", skip,
+			"fail", fail,
+		)
+		if retErr != nil {
+			logger.Error(taskCtx, "task end", append(fields, "result", "failed", "err", retErr)...)
+			return
+		}
+		logger.Info(taskCtx, "task end", append(fields, "result", "ok")...)
+	}()
+
 	// 1) 取待回传发票（status=4）
 	items, err := d.orderStore.FindByStatus(taskCtx, 4, ctx.Size)
 	if err != nil {
-		return err
+		retErr = err
+		return retErr
 	}
 	if len(items) == 0 {
 		return nil
 	}
+	total = len(items)
 
 	// 2) 初始化客户端：DSCO + 领星
 	dscoCli, err := d.dscoClient()
 	if err != nil {
-		return err
+		retErr = err
+		return retErr
 	}
 	lx, err := d.lingxingClient(taskCtx)
 	if err != nil {
-		return err
+		retErr = err
+		return retErr
 	}
 
 	var invs []dsco.Invoice
@@ -61,22 +92,64 @@ func (d *Domain) InvoiceToDSCO(ctx integration.TaskContext) error {
 	}
 
 	for _, row := range items {
-		po := row.PONumber
+		po := strings.TrimSpace(row.PONumber)
+		if po == "" {
+			skip++
+			logger.Info(taskCtx, "order done",
+				append(base,
+					"task", "invoice_to_dsco",
+					"po_number", "",
+					"result", "skip",
+					"reason", "po_number_empty",
+				)...,
+			)
+			continue
+		}
 		// 0) 幂等：已写入 dsco_invoice_id 的订单视为已回传过 invoice，直接跳过。
 		if row.DSCOInvoiceID != "" {
+			skip++
+			logger.Info(taskCtx, "order done",
+				append(base,
+					"task", "invoice_to_dsco",
+					"po_number", po,
+					"result", "skip",
+					"reason", "already_has_invoice_id",
+					"invoice_id", row.DSCOInvoiceID,
+				)...,
+			)
 			continue
 		}
 
 		// 3) 解析 DSCO 原始订单（用于 dscoItemId/币种/参考字段等）
 		var dscoOrder dsco.Order
 		if err := json.Unmarshal(row.Payload, &dscoOrder); err != nil {
+			fail++
+			logger.Warn(taskCtx, "order done",
+				append(base,
+					"task", "invoice_to_dsco",
+					"po_number", po,
+					"result", "fail",
+					"reason", "decode_dsco_payload_failed",
+					"dsco_raw", integration.JSONForLog(row.Payload),
+					"err", err,
+				)...,
+			)
 			continue
 		}
 
 		// 3.1) sid：用于 WmsOrderList 精准查询（从 mapping.shop 解析）
 		sid, ok := lingxingSIDFromMapping(ctx.Config, dscoOrder)
 		if !ok {
-			logger.Warn(taskCtx, "missing mapping.shop sid for wms order list", "po_number", po)
+			skip++
+			logger.Info(taskCtx, "order done",
+				append(base,
+					"task", "invoice_to_dsco",
+					"po_number", po,
+					"result", "skip",
+					"reason", "missing_mapping_shop_sid",
+					"dsco_raw", integration.JSONForLog(row.Payload),
+				)...,
+			)
 			continue
 		}
 
@@ -87,6 +160,16 @@ func (d *Domain) InvoiceToDSCO(ctx integration.TaskContext) error {
 			PlatformOrderNoArr: []string{po},
 		})
 		if err != nil || len(wmsOrders) == 0 {
+			skip++
+			logger.Info(taskCtx, "order done",
+				append(base,
+					"task", "invoice_to_dsco",
+					"po_number", po,
+					"result", "skip",
+					"reason", "lingxing_wms_order_not_found",
+					"err", err,
+				)...,
+			)
 			continue
 		}
 
@@ -155,6 +238,17 @@ func (d *Domain) InvoiceToDSCO(ctx integration.TaskContext) error {
 			total += float64(p.Count) * unit
 		}
 		if len(lineItems) == 0 {
+			skip++
+			logger.Info(taskCtx, "order done",
+				append(base,
+					"task", "invoice_to_dsco",
+					"po_number", po,
+					"result", "skip",
+					"reason", "no_line_items_to_invoice",
+					"wms_order_raw", integration.JSONForLog(wmsOrders[0]),
+					"dsco_raw", integration.JSONForLog(row.Payload),
+				)...,
+			)
 			continue
 		}
 
@@ -174,7 +268,7 @@ func (d *Domain) InvoiceToDSCO(ctx integration.TaskContext) error {
 			invoiceID = fmt.Sprintf("%s-%d", po, 1)
 		}
 		// 10) 组装 DSCO 发票对象
-		invs = append(invs, dsco.Invoice{
+		inv := dsco.Invoice{
 			InvoiceID:           invoiceID,
 			PoNumber:            po,
 			ConsumerOrderNumber: derefString(dscoOrder.ConsumerOrderNumber),
@@ -183,11 +277,22 @@ func (d *Domain) InvoiceToDSCO(ctx integration.TaskContext) error {
 			CurrencyCode:        currency,
 			TotalAmount:         total,
 			LineItems:           lineItems,
-		})
+		}
+		invs = append(invs, inv)
 		toUpdate = append(toUpdate, struct {
 			po        string
 			invoiceID string
 		}{po: po, invoiceID: invoiceID})
+
+		logger.Info(taskCtx, "order prepared",
+			append(base,
+				"task", "invoice_to_dsco",
+				"po_number", po,
+				"invoice_id", invoiceID,
+				"invoice_request", integration.JSONForLog(inv),
+				"wms_order_raw", integration.JSONForLog(wmsOrders[0]),
+			)...,
+		)
 	}
 	if len(invs) == 0 {
 		return nil
@@ -195,13 +300,43 @@ func (d *Domain) InvoiceToDSCO(ctx integration.TaskContext) error {
 	// 11) 调用 DSCO invoice 批量接口
 	_, err = dscoCli.Invoice.CreateSmallBatch(taskCtx, invs)
 	if err != nil {
-		return err
+		retErr = err
+		logger.Error(taskCtx, "dsco invoice createSmallBatch failed",
+			append(base,
+				"task", "invoice_to_dsco",
+				"batch", integration.JSONForLog(invs),
+				"err", err,
+			)...,
+		)
+		return retErr
 	}
 	// 12) 回传成功：写回 invoiceId，并推进到 status=5
 	for _, it := range toUpdate {
 		if err := d.orderStore.UpdateStatusAndFields(taskCtx, it.po, 5, "", it.invoiceID); err != nil {
-			logger.Warn(taskCtx, "update status after invoice failed", "err", err)
+			fail++
+			logger.Warn(taskCtx, "order done",
+				append(base,
+					"task", "invoice_to_dsco",
+					"po_number", it.po,
+					"result", "fail",
+					"reason", "update_local_status_failed_after_invoice",
+					"invoice_id", it.invoiceID,
+					"err", err,
+				)...,
+			)
+			continue
 		}
+		okCount++
+		logger.Info(taskCtx, "order done",
+			append(base,
+				"task", "invoice_to_dsco",
+				"po_number", it.po,
+				"result", "ok",
+				"reason", "dsco_invoice_sent",
+				"invoice_id", it.invoiceID,
+				"new_status", 5,
+			)...,
+		)
 	}
 	return nil
 }

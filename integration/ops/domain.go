@@ -2,6 +2,7 @@ package ops
 
 import (
 	"context"
+	"time"
 
 	"example.com/lingxing/golib/v2/tool/logger"
 
@@ -22,11 +23,25 @@ func NewDomain(env config.EnvConfig) *Domain {
 	}
 }
 
-func (d *Domain) CleanupExports(ctx integration.TaskContext) error {
+func (d *Domain) CleanupExports(ctx integration.TaskContext) (retErr error) {
 	taskCtx := ctx.Ctx
 	if taskCtx == nil {
 		taskCtx = context.Background()
 	}
+	startedAt := time.Now().UTC()
+	base := ctx.BaseLogFields()
+	logger.Info(taskCtx, "task begin", append(base, "task", "cleanup_exports")...)
+	defer func() {
+		fields := append(base,
+			"task", "cleanup_exports",
+			"duration_ms", time.Since(startedAt).Milliseconds(),
+		)
+		if retErr != nil {
+			logger.Error(taskCtx, "task end", append(fields, "result", "failed", "err", retErr)...)
+			return
+		}
+		logger.Info(taskCtx, "task end", append(fields, "result", "ok")...)
+	}()
 	if d.exportDir == "" || d.cleanupThreshold <= 0 {
 		return nil
 	}
@@ -36,7 +51,8 @@ func (d *Domain) CleanupExports(ctx integration.TaskContext) error {
 	after, _ := fileutil.DirSizeBytes(d.exportDir)
 	if err != nil {
 		logger.Warn(taskCtx, "cleanup exports failed", "err", err, "dir", d.exportDir)
-		return err
+		retErr = err
+		return retErr
 	}
 	if deleted > 0 {
 		logger.Info(taskCtx, "cleanup exports done",

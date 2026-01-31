@@ -3,6 +3,7 @@ package dsco_lingxing
 import (
 	"context"
 	"strings"
+	"time"
 
 	"example.com/lingxing/golib/v2/sdk/dsco"
 	"example.com/lingxing/golib/v2/sdk/lingxing"
@@ -22,25 +23,54 @@ import (
 //     - mapping.shipment：<shipWarehouseCode(空则用 requestedWarehouseCode)>-<shippingServiceLevelCode> -> 领星 logistics_type_id
 //  4. 幂等：创建前先查领星是否已存在该 poNumber；存在则直接推进状态到 2，不重复创建。
 //  5. 调用 CreateOrdersV2（最小必要字段），成功后推进状态到 2。
-func (d *Domain) PushToLingXing(ctx integration.TaskContext) error {
+func (d *Domain) PushToLingXing(ctx integration.TaskContext) (retErr error) {
 	taskCtx := ctx.Ctx
 	if taskCtx == nil {
 		taskCtx = context.Background()
 	}
 
+	startedAt := time.Now().UTC()
+	base := ctx.BaseLogFields()
+	logger.Info(taskCtx, "task begin", append(base, "task", "push_to_lingxing")...)
+
+	var (
+		total   int
+		okCount int
+		skip    int
+		fail    int
+	)
+	defer func() {
+		fields := append(base,
+			"task", "push_to_lingxing",
+			"duration_ms", time.Since(startedAt).Milliseconds(),
+			"total", total,
+			"ok", okCount,
+			"skip", skip,
+			"fail", fail,
+		)
+		if retErr != nil {
+			logger.Error(taskCtx, "task end", append(fields, "result", "failed", "err", retErr)...)
+			return
+		}
+		logger.Info(taskCtx, "task end", append(fields, "result", "ok")...)
+	}()
+
 	// 1) 取待推单（status=1）
 	items, err := d.orderStore.FindByStatus(taskCtx, 1, ctx.Size)
 	if err != nil {
-		return err
+		retErr = err
+		return retErr
 	}
 	if len(items) == 0 {
 		return nil
 	}
+	total = len(items)
 
 	// 2) 初始化领星客户端
 	lx, err := d.lingxingClient(taskCtx)
 	if err != nil {
-		return err
+		retErr = err
+		return retErr
 	}
 
 	// 4) 幂等检查（批量）：本批次所有 poNumber 一次性查询，避免逐单调用导致触发 API 限制。
@@ -80,24 +110,75 @@ func (d *Domain) PushToLingXing(ctx integration.TaskContext) error {
 			}
 		}
 	}
+	logger.Info(taskCtx, "lingxing existing orders checked",
+		append(base,
+			"task", "push_to_lingxing",
+			"po_count", len(poNumbers),
+			"existing", len(existing),
+		)...,
+	)
 
 	for _, row := range items {
+		po := strings.TrimSpace(row.PONumber)
 		// 4.1) 若领星已存在该 poNumber，则不再创建，直接推进状态到 2。
-		if _, ok := existing[row.PONumber]; ok {
-			if err := d.orderStore.UpdateStatusAndFields(taskCtx, row.PONumber, 2, "", ""); err != nil {
-				logger.Warn(taskCtx, "update status failed", "err", err)
+		if detail, ok := existing[po]; ok {
+			if err := d.orderStore.UpdateStatusAndFields(taskCtx, po, 2, "", ""); err != nil {
+				fail++
+				logger.Warn(taskCtx, "order done",
+					append(base,
+						"task", "push_to_lingxing",
+						"po_number", po,
+						"result", "fail",
+						"reason", "update_local_status_failed_for_existing_order",
+						"lingxing_status", int(detail.Status),
+						"lingxing_raw", integration.JSONForLog(detail),
+						"err", err,
+					)...,
+				)
+				continue
 			}
+			skip++
+			logger.Info(taskCtx, "order done",
+				append(base,
+					"task", "push_to_lingxing",
+					"po_number", po,
+					"result", "skip",
+					"reason", "lingxing_order_already_exists",
+					"lingxing_status", int(detail.Status),
+					"lingxing_raw", integration.JSONForLog(detail),
+					"new_status", 2,
+				)...,
+			)
 			continue
 		}
 
 		// 2.1) 解析 DSCO 原始订单 payload（payload 保留原始 JSON，方便审计/排查）
 		order, err := decodeDSCOOrder(row.Payload)
 		if err != nil {
-			logger.Warn(taskCtx, "decode dsco payload failed", "err", err)
+			fail++
+			logger.Warn(taskCtx, "order done",
+				append(base,
+					"task", "push_to_lingxing",
+					"po_number", po,
+					"result", "fail",
+					"reason", "decode_dsco_payload_failed",
+					"dsco_raw", integration.JSONForLog(row.Payload),
+					"err", err,
+				)...,
+			)
 			continue
 		}
 		if strings.TrimSpace(order.PoNumber) == "" {
-			logger.Warn(taskCtx, "dsco poNumber empty, skip")
+			skip++
+			logger.Info(taskCtx, "order done",
+				append(base,
+					"task", "push_to_lingxing",
+					"po_number", "",
+					"result", "skip",
+					"reason", "dsco_po_number_empty",
+					"dsco_raw", integration.JSONForLog(row.Payload),
+				)...,
+			)
 			continue
 		}
 
@@ -108,7 +189,17 @@ func (d *Domain) PushToLingXing(ctx integration.TaskContext) error {
 			storeID = strings.TrimSpace(ctx.Config.Mapping.Shop[shopKey])
 		}
 		if storeID == "" {
-			logger.Warn(taskCtx, "missing mapping.shop for dsco retailer id", "po_number", order.PoNumber, "shop_key", shopKey)
+			skip++
+			logger.Info(taskCtx, "order done",
+				append(base,
+					"task", "push_to_lingxing",
+					"po_number", order.PoNumber,
+					"result", "skip",
+					"reason", "missing_mapping_shop_store_id",
+					"shop_key", shopKey,
+					"dsco_raw", integration.JSONForLog(row.Payload),
+				)...,
+			)
 			continue
 		}
 
@@ -134,7 +225,17 @@ func (d *Domain) PushToLingXing(ctx integration.TaskContext) error {
 			key := shipWarehouseCode + "-" + serviceLevelCode
 			logisticsTypeID = strings.TrimSpace(ctx.Config.Mapping.Shipment[key])
 			if logisticsTypeID == "" {
-				logger.Warn(taskCtx, "missing mapping.shipment for logistics_type_id", "po_number", order.PoNumber, "key", key)
+				skip++
+				logger.Info(taskCtx, "order done",
+					append(base,
+						"task", "push_to_lingxing",
+						"po_number", order.PoNumber,
+						"result", "skip",
+						"reason", "missing_mapping_shipment_logistics_type_id",
+						"key", key,
+						"dsco_raw", integration.JSONForLog(row.Payload),
+					)...,
+				)
 				continue
 			}
 		}
@@ -142,7 +243,16 @@ func (d *Domain) PushToLingXing(ctx integration.TaskContext) error {
 		// 2.2) 地址校验（MVP：仅校验最小必填；更严格校验后续可根据日志再补）
 		addr := order.Shipping
 		if addr == nil {
-			logger.Warn(taskCtx, "missing shipping address", "po_number", order.PoNumber)
+			skip++
+			logger.Info(taskCtx, "order done",
+				append(base,
+					"task", "push_to_lingxing",
+					"po_number", order.PoNumber,
+					"result", "skip",
+					"reason", "missing_shipping_address",
+					"dsco_raw", integration.JSONForLog(row.Payload),
+				)...,
+			)
 			continue
 		}
 		country := strings.TrimSpace(derefString(addr.Country))
@@ -160,7 +270,16 @@ func (d *Domain) PushToLingXing(ctx integration.TaskContext) error {
 			line1 = strings.TrimSpace(addr.Address[0])
 		}
 		if line1 == "" || name == "" || strings.TrimSpace(addr.City) == "" {
-			logger.Warn(taskCtx, "missing required address fields", "po_number", order.PoNumber)
+			skip++
+			logger.Info(taskCtx, "order done",
+				append(base,
+					"task", "push_to_lingxing",
+					"po_number", order.PoNumber,
+					"result", "skip",
+					"reason", "missing_required_address_fields",
+					"dsco_raw", integration.JSONForLog(row.Payload),
+				)...,
+			)
 			continue
 		}
 
@@ -181,7 +300,14 @@ func (d *Domain) PushToLingXing(ctx integration.TaskContext) error {
 			}
 			unitPrice, ok := pickUnitPrice(li)
 			if !ok {
-				logger.Warn(taskCtx, "unit price missing", "po_number", order.PoNumber, "sku", msku)
+				// 行项目级别的跳过，不终止整单；仍保留在最终 createItems 为空时做订单级别 skip。
+				logger.Warn(taskCtx, "dsco line item unit price missing",
+					append(base,
+						"task", "push_to_lingxing",
+						"po_number", order.PoNumber,
+						"sku", msku,
+					)...,
+				)
 				continue
 			}
 			createItems = append(createItems, lingxing.CreateOrderItemV2{
@@ -191,7 +317,16 @@ func (d *Domain) PushToLingXing(ctx integration.TaskContext) error {
 			})
 		}
 		if len(createItems) == 0 {
-			logger.Warn(taskCtx, "no items for order", "po_number", order.PoNumber)
+			skip++
+			logger.Info(taskCtx, "order done",
+				append(base,
+					"task", "push_to_lingxing",
+					"po_number", order.PoNumber,
+					"result", "skip",
+					"reason", "no_valid_items",
+					"dsco_raw", integration.JSONForLog(row.Payload),
+				)...,
+			)
 			continue
 		}
 
@@ -224,20 +359,64 @@ func (d *Domain) PushToLingXing(ctx integration.TaskContext) error {
 
 		resp, err := lx.Order.CreateOrdersV2(taskCtx, req)
 		if err != nil {
-			logger.Warn(taskCtx, "lingxing create order failed", "po_number", order.PoNumber, "err", err)
+			fail++
+			logger.Warn(taskCtx, "order done",
+				append(base,
+					"task", "push_to_lingxing",
+					"po_number", order.PoNumber,
+					"result", "fail",
+					"reason", "lingxing_create_order_failed",
+					"create_req", integration.JSONForLog(req),
+					"dsco_raw", integration.JSONForLog(row.Payload),
+					"err", err,
+				)...,
+			)
 			continue
 		}
 		if len(resp.SuccessDetails) == 0 && len(resp.ErrorDetails) > 0 {
 			// 保持简单：不推进状态，下次定时任务自动重试；失败原因仅日志。
-			logger.Warn(taskCtx, "lingxing create order error detail", "po_number", order.PoNumber, "msg", resp.ErrorDetails[0].ErrorMessage)
+			fail++
+			logger.Warn(taskCtx, "order done",
+				append(base,
+					"task", "push_to_lingxing",
+					"po_number", order.PoNumber,
+					"result", "fail",
+					"reason", "lingxing_create_order_error_detail",
+					"create_req", integration.JSONForLog(req),
+					"resp", integration.JSONForLog(resp),
+					"msg", resp.ErrorDetails[0].ErrorMessage,
+				)...,
+			)
 			continue
 		}
 
 		// 6) 推单成功：推进状态到 2（待回传 ACK）
 		if err := d.orderStore.UpdateStatusAndFields(taskCtx, order.PoNumber, 2, "", ""); err != nil {
-			logger.Warn(taskCtx, "update status failed", "err", err)
+			fail++
+			logger.Warn(taskCtx, "order done",
+				append(base,
+					"task", "push_to_lingxing",
+					"po_number", order.PoNumber,
+					"result", "fail",
+					"reason", "update_local_status_failed_after_create",
+					"resp", integration.JSONForLog(resp),
+					"err", err,
+				)...,
+			)
 			continue
 		}
+		okCount++
+		logger.Info(taskCtx, "order done",
+			append(base,
+				"task", "push_to_lingxing",
+				"po_number", order.PoNumber,
+				"result", "ok",
+				"reason", "lingxing_create_order_ok",
+				"create_req", integration.JSONForLog(req),
+				"resp", integration.JSONForLog(resp),
+				"new_status", 2,
+			)...,
+		)
 	}
 	return nil
 }

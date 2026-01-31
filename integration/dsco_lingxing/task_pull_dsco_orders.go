@@ -29,16 +29,43 @@ import (
 //     - shipment：使用 shippingServiceLevelCode（已确认），用于列表筛选与 CSV 导出。
 //     - dsco_retailer_id：写入 dscoRetailerId，用于 mapping.shop（店铺/渠道映射）。
 //  4. Upsert 入库：允许覆盖 payload/status（用于初始化补数据、人工纠错）。
-func (d *Domain) PullDSCOOrders(ctx integration.TaskContext) error {
+func (d *Domain) PullDSCOOrders(ctx integration.TaskContext) (retErr error) {
 	taskCtx := ctx.Ctx
 	if taskCtx == nil {
 		taskCtx = context.Background()
 	}
 
+	startedAt := time.Now().UTC()
+	base := ctx.BaseLogFields()
+	logger.Info(taskCtx, "task begin", append(base, "task", "pull_dsco_orders")...)
+
+	var (
+		pulled int
+		okCnt  int
+		skip   int
+		fail   int
+	)
+	defer func() {
+		fields := append(base,
+			"task", "pull_dsco_orders",
+			"duration_ms", time.Since(startedAt).Milliseconds(),
+			"pulled", pulled,
+			"ok", okCnt,
+			"skip", skip,
+			"fail", fail,
+		)
+		if retErr != nil {
+			logger.Error(taskCtx, "task end", append(fields, "result", "failed", "err", retErr)...)
+			return
+		}
+		logger.Info(taskCtx, "task end", append(fields, "result", "ok")...)
+	}()
+
 	// 1) 初始化 DSCO 客户端
 	cli, err := d.dscoClient()
 	if err != nil {
-		return err
+		retErr = err
+		return retErr
 	}
 
 	var (
@@ -66,7 +93,8 @@ func (d *Domain) PullDSCOOrders(ctx integration.TaskContext) error {
 		// 1.2) 定时触发：用 dsco_create_time 最大值作为游标；表空则使用固定起点
 		maxTime, ok, err := d.orderStore.GetMaxDSCOCreateTime(taskCtx)
 		if err != nil {
-			return err
+			retErr = err
+			return retErr
 		}
 		if ok {
 			since = time.Unix(maxTime, 0).UTC()
@@ -83,7 +111,14 @@ func (d *Domain) PullDSCOOrders(ctx integration.TaskContext) error {
 		OrdersPerPage:      ctx.Size,
 	}
 
-	var pulled int
+	logger.Info(taskCtx, "pull dsco orders window",
+		append(base,
+			"task", "pull_dsco_orders",
+			"since", since.Format(time.RFC3339),
+			"until", until.Format(time.RFC3339),
+		)...,
+	)
+
 	var scroll string
 	for {
 		// 2.1) scrollId 分页：DSCO 返回 scrollId 表示下一页
@@ -92,7 +127,8 @@ func (d *Domain) PullDSCOOrders(ctx integration.TaskContext) error {
 		}
 		resp, err := cli.Order.GetPageRaw(taskCtx, q)
 		if err != nil {
-			return err
+			retErr = err
+			return retErr
 		}
 		scroll = resp.ScrollID
 		if len(resp.Orders) == 0 {
@@ -104,6 +140,16 @@ func (d *Domain) PullDSCOOrders(ctx integration.TaskContext) error {
 			order, err := decodeDSCOOrder(raw)
 			if err != nil {
 				logger.Warn(taskCtx, "decode dsco order failed", "err", err)
+				logger.Warn(taskCtx, "order done",
+					append(base,
+						"task", "pull_dsco_orders",
+						"result", "fail",
+						"reason", "decode_dsco_order_failed",
+						"dsco_raw", integration.JSONForLog(raw),
+						"err", err,
+					)...,
+				)
+				fail++
 				continue
 			}
 
@@ -112,12 +158,37 @@ func (d *Domain) PullDSCOOrders(ctx integration.TaskContext) error {
 			createUnix, err := parseRFC3339ToUnixSec(createStr)
 			if err != nil {
 				logger.Warn(taskCtx, "parse dsco create time failed", "err", err)
+				logger.Warn(taskCtx, "order done",
+					append(base,
+						"task", "pull_dsco_orders",
+						"po_number", order.PoNumber,
+						"result", "fail",
+						"reason", "parse_dsco_create_time_failed",
+						"dsco_create_time", createStr,
+						"dsco_raw", integration.JSONForLog(raw),
+						"err", err,
+					)...,
+				)
+				fail++
 				continue
 			}
 
 			// 手动拉单范围边界：[start,end)
 			if ctx.Trigger == integration.TriggerManual && !since.IsZero() && !until.IsZero() {
 				if createUnix < since.Unix() || createUnix >= until.Unix() {
+					skip++
+					logger.Info(taskCtx, "order done",
+						append(base,
+							"task", "pull_dsco_orders",
+							"po_number", order.PoNumber,
+							"result", "skip",
+							"reason", "out_of_manual_time_range",
+							"dsco_create_unix", createUnix,
+							"since", since.Format(time.RFC3339),
+							"until", until.Format(time.RFC3339),
+							"dsco_raw", integration.JSONForLog(raw),
+						)...,
+					)
 					continue
 				}
 			}
@@ -157,9 +228,24 @@ func (d *Domain) PullDSCOOrders(ctx integration.TaskContext) error {
 			// 4) Upsert：允许覆盖更新（初始化补数据、人工纠错）
 			if err := d.orderStore.Upsert(taskCtx, row); err != nil {
 				logger.Warn(taskCtx, "upsert dsco_order_sync failed", "err", err)
+				fail++
 				continue
 			}
 			pulled++
+			okCnt++
+
+			logger.Info(taskCtx, "order done",
+				append(base,
+					"task", "pull_dsco_orders",
+					"po_number", order.PoNumber,
+					"result", "ok",
+					"reason", "upsert_ok",
+					"dsco_status", dscoStatus,
+					"dsco_create_unix", createUnix,
+					"local_status", rowStatus,
+					"dsco_raw", integration.JSONForLog(raw),
+				)...,
+			)
 		}
 
 		// Safety break: if scrollId empty, DSCO has no more pages.
@@ -168,7 +254,6 @@ func (d *Domain) PullDSCOOrders(ctx integration.TaskContext) error {
 		}
 	}
 
-	logger.Info(taskCtx, "pull dsco orders done", "count", pulled)
 	return nil
 }
 
