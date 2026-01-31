@@ -89,7 +89,7 @@ func TestBoarding_Order_Method1_GetOrderObject(t *testing.T) {
 		// fmt.Println(*o.DscoRetailerID, o.PoNumber, *o.RequestedWarehouseCode, *o.ShipWarehouseCode)
 		fmt.Println("Raw response:", res)
 		fmt.Println(o.PoNumber, o.DscoStatus, o.Packages,
-			*o.Shipping.Phone, *o.Shipping.Name, o.Shipping.Postal, *o.BuyerMessage)
+			*o.Shipping.Phone, *o.Shipping.Name, o.Shipping.Postal, *o.BuyerMessage, *o.Shipping.State, *o.Shipping.Region)
 		// for _, li := range o.LineItems {
 		// 	t.Logf("lineItem: %+v", li)
 		// }

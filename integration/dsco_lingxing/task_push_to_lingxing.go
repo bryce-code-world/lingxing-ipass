@@ -348,10 +348,12 @@ func (d *Domain) PushToLingXing(ctx integration.TaskContext) (retErr error) {
 					ReceiverName:        name,                                               // 收件人
 					BuyerName:           name,                                               // 买家姓名（暂与收件人相同）
 					BuyerNote:           strings.TrimSpace(derefString(order.BuyerMessage)), // 买家留言
-					BuyerEmail:          *addr.Email,                                        // 买家邮箱
-					ReceiverMobile:      *addr.Phone,                                        // 手机号
+					BuyerEmail:          strings.TrimSpace(derefString(addr.Email)),         // 买家邮箱
+					ReceiverMobile:      strings.TrimSpace(derefString(addr.Phone)),         // 手机号
 					ReceiverCountryCode: country,                                            // 国家代码
+					StateOrRegion:       strings.TrimSpace(derefString(addr.State)),         // 省/州
 					City:                strings.TrimSpace(addr.City),                       // 城市
+					District:            strings.TrimSpace(derefString(addr.Region)),        // 区/县行政单位
 					AddressLine1:        line1,                                              // 地址行1
 					PostalCode:          addr.Postal,                                        // 邮编
 					// 仓库和物流信息

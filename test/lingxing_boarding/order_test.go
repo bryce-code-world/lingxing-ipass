@@ -90,6 +90,8 @@ func TestOrderService_UpdateOrderV2(t *testing.T) {
 				{
 					GlobalOrderNo: 103664089112657920,
 					AddressInfo: &lingxing.UpdateOrderV2AddressInfo{
+						District:       "CA",
+						StateOrRegion:  "CA",
 						PostalCode:     "90025-5705",
 						ReceiverMobile: "8054711106",
 						ReceiverTel:    "8054711106",
