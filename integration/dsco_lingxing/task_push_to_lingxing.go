@@ -356,6 +356,7 @@ func (d *Domain) PushToLingXing(ctx integration.TaskContext) (retErr error) {
 					District:            strings.TrimSpace(derefString(addr.Region)),        // 区/县行政单位
 					AddressLine1:        line1,                                              // 地址行1
 					PostalCode:          addr.Postal,                                        // 邮编
+					DoorplateNo:         strings.TrimSpace(derefString(addr.Address2)),      // 门牌号（地址行2）
 					// 仓库和物流信息
 					WID:             wid,             // 领星仓库ID
 					LogisticsTypeID: logisticsTypeID, // 领星物流 type_id
