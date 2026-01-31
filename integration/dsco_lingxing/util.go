@@ -188,6 +188,16 @@ func getDSCOShipMethod(o dsco.Order) string {
 	return ""
 }
 
+func getDSCOShipCarrier(o dsco.Order) string {
+	if o.RequestedShipCarrier != nil && strings.TrimSpace(*o.RequestedShipCarrier) != "" {
+		return strings.TrimSpace(*o.RequestedShipCarrier)
+	}
+	if o.ShipCarrier != nil && strings.TrimSpace(*o.ShipCarrier) != "" {
+		return strings.TrimSpace(*o.ShipCarrier)
+	}
+	return ""
+}
+
 func getDSCOWarehouseCode(o dsco.Order) string {
 	if o.RequestedWarehouseCode != nil && strings.TrimSpace(*o.RequestedWarehouseCode) != "" {
 		return strings.TrimSpace(*o.RequestedWarehouseCode)

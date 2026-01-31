@@ -272,11 +272,10 @@ func (d *Domain) ShipToDSCO(ctx integration.TaskContext) (retErr error) {
 			continue
 		}
 
-		// 4) DSCO shipMethod 口径：优先 shipMethod；没有则用 shippingServiceLevelCode（已确认）
+		// 4) DSCO 物流信息 口径
 		dscoShipMethod := getDSCOShipMethod(dscoOrder)
-		if dscoShipMethod == "" {
-			dscoShipMethod = getDSCOShippingServiceLevelCode(dscoOrder)
-		}
+		dscoShipCarrier := getDSCOShipCarrier(dscoOrder)
+		dscoShipServiceLevelCode := getDSCOShippingServiceLevelCode(dscoOrder)
 
 		// 5) 查询领星出库单：运单号 + 发货时间 + 实发数量（可能返回多条）
 		wmsOrders, _, err := lx.Warehouse.WmsOrderList(taskCtx, lingxing.WmsOrderListRequest{
@@ -418,11 +417,13 @@ func (d *Domain) ShipToDSCO(ctx integration.TaskContext) (retErr error) {
 				continue
 			}
 			shipments = append(shipments, dsco.ShipmentForUpdate{
-				TrackingNumber: tracking,
-				ShipDate:       agg.shipDate,
-				ShipMethod:     dscoShipMethod,
-				WarehouseCode:  dscoWarehouseCode,
-				LineItems:      lineItems,
+				TrackingNumber:           tracking,
+				ShipDate:                 agg.shipDate,
+				ShipCarrier:              dscoShipCarrier,
+				ShipMethod:               dscoShipMethod,
+				ShippingServiceLevelCode: dscoShipServiceLevelCode,
+				WarehouseCode:            dscoWarehouseCode,
+				LineItems:                lineItems,
 			})
 		}
 		if len(shipments) == 0 {
