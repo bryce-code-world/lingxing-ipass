@@ -201,15 +201,23 @@ func (d *Domain) PushToLingXing(ctx integration.TaskContext) error {
 			StoreID:      storeID,
 			Orders: []lingxing.CreateOrderV2{
 				{
-					PlatformOrderNo:     order.PoNumber,
-					ReceiverCountryCode: country,
-					ReceiverName:        name,
-					City:                strings.TrimSpace(addr.City),
-					AddressLine1:        line1,
-					WID:                 wid,
-					LogisticsTypeID:     logisticsTypeID,
-					AmountCurrency:      "USD", // 一期口径：DSCO 订单均为美国站点，币种固定 USD
-					Items:               createItems,
+					PlatformOrderNo: order.PoNumber,
+					// 收件信息
+					ReceiverName:        name,                         // 收件人
+					BuyerName:           name,                         // 买家姓名（暂与收件人相同）
+					BuyerEmail:          *addr.Email,                  // 买家邮箱
+					ReceiverMobile:      *addr.Phone,                  // 手机号
+					ReceiverCountryCode: country,                      // 国家代码
+					City:                strings.TrimSpace(addr.City), // 城市
+					AddressLine1:        line1,                        // 地址行1
+					PostalCode:          addr.Postal,                  // 邮编
+					// 仓库和物流信息
+					WID:             wid,             // 领星仓库ID
+					LogisticsTypeID: logisticsTypeID, // 领星物流 type_id
+					// 币种
+					AmountCurrency: "USD", // 一期口径：DSCO 订单均为美国站点，币种固定 USD
+					// 订单
+					Items: createItems,
 				},
 			},
 		}

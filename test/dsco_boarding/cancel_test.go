@@ -1,6 +1,4 @@
-//go:build dsco_boarding
-
-package boarding
+package dsco_boarding
 
 import (
 	"context"

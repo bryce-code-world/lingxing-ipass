@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	envEnable = 0
+	envEnable = 1
 	envAppID  = "ak_Grz0cgq6BIM1G"
 	envSecret = "Amn/Cms7r8Q8W+9PkE8N0A=="
 )

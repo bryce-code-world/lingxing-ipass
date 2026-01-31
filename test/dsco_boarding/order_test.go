@@ -1,6 +1,4 @@
-//go:build dsco_boarding
-
-package boarding
+package dsco_boarding
 
 import (
 	"context"
@@ -39,9 +37,10 @@ var (
 		// "5J7PMN8NH5DSBCXL2M1Y",
 		// "DJLLQWTZX5CA85ZWN1NL",
 		// "S5S71DCU8X8QMVEMFRSE",   // shipped
-		"T77OMD7909R5CD4DZK38O4", // shipment_pending
-		"P5E9VZQYS8A7MVWZMRZC",   // created
-		"XGKD4ZBKQKZLQ1K5E5FC",   // cancelled
+		// "T77OMD7909R5CD4DZK38O4", // shipment_pending
+		"P5E9VZQYS8A7MVWZMRZC", // created
+		"XGKD4ZBKQKZLQ1K5E5FC", // cancelled
+		"6ECM5T57UBS9CV6WDWNX",
 	}
 )
 
@@ -69,7 +68,7 @@ func newOrderClient(t *testing.T) *dsco.Client {
 //
 // 对应 onboarding：GET Get Order Object（GET /order/）。
 //
-// go test -v -count=1 .\order_test.go -run TestBoarding_Order_Method1_GetOrderObject
+// go test -v -count=1 ./order_test.go -run TestBoarding_Order_Method1_GetOrderObject
 func TestBoarding_Order_Method1_GetOrderObject(t *testing.T) {
 	cli := newOrderClient(t)
 
@@ -89,7 +88,8 @@ func TestBoarding_Order_Method1_GetOrderObject(t *testing.T) {
 		// fmt.Println(*o.Shipping.Country, *o.Shipping.State, o.Shipping.City, o.Shipping.Address, *o.Shipping.Name)
 		// fmt.Println(*o.DscoRetailerID, o.PoNumber, *o.RequestedWarehouseCode, *o.ShipWarehouseCode)
 		// fmt.Println("Raw response:", res)
-		fmt.Println(o.DscoStatus, o.Packages)
+		fmt.Println(o.PoNumber, o.DscoStatus, o.Packages,
+			*o.Shipping.Phone, *o.Shipping.Name, o.Shipping.Postal)
 		// for _, li := range o.LineItems {
 		// 	t.Logf("lineItem: %+v", li)
 		// }

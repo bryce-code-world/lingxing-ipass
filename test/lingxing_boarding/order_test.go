@@ -40,7 +40,7 @@ func TestOrderService_CreateOrdersV2(t *testing.T) {
 
 // 获取订单列表
 //
-// go test -v -count=1 .\\init.go .\\order_test.go -run TestOrderService_ListOrdersV2
+// go test -v -count=1 ./init.go ./order_test.go -run TestOrderService_ListOrdersV2
 func TestOrderService_ListOrdersV2(t *testing.T) {
 	cli := newClient(t)
 	out, res, err := cli.Order.ListOrdersV2WithRawBody(context.Background(), lingxing.OrderListV2Request{
@@ -83,7 +83,23 @@ func TestOrderService_EditOrderV2(t *testing.T) {
 // 更新订单
 func TestOrderService_UpdateOrderV2(t *testing.T) {
 	cli := newClient(t)
-	out, err := cli.Order.UpdateOrderV2(context.Background(), lingxing.UpdateOrderV2Request{})
+	out, res, err := cli.Order.UpdateOrderV2WithRawBody(
+		context.Background(),
+		lingxing.UpdateOrderV2Request{
+			OrderList: []lingxing.UpdateOrderV2Item{
+				{
+					GlobalOrderNo: 103664089112657920,
+					AddressInfo: &lingxing.UpdateOrderV2AddressInfo{
+						PostalCode:     "90025-5705",
+						ReceiverMobile: "8054711106",
+						ReceiverTel:    "8054711106",
+					},
+					OrderItemList: []lingxing.UpdateOrderV2OrderItem{},
+				},
+			},
+		},
+	)
+	fmt.Println("UpdateOrderV2 raw resp:", res)
 	if err != nil {
 		t.Fatalf("UpdateOrderV2() err=%v", err)
 	}
