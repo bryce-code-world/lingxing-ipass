@@ -291,7 +291,8 @@ func (d *Domain) PushToLingXing(ctx integration.TaskContext) (retErr error) {
 		}
 
 		// 2.3) 行项目组装：
-		// - SKU 不映射：直接使用 DSCO sku/partnerSku 赋值到领星 MSKU（领星侧自动匹配）。
+		// - MSKU：直接使用 DSCO sku/partnerSku（领星侧可自动匹配）。
+		// - SKU：若在 mapping.sku 中存在映射，则补齐领星平台维度 SKU；否则不传（omitempty）。
 		// - 单价：按字段优先级选择，尽量避免领星校验失败。
 		createItems := make([]lingxing.CreateOrderItemV2, 0, len(order.LineItems))
 		for _, li := range order.LineItems {
@@ -317,7 +318,14 @@ func (d *Domain) PushToLingXing(ctx integration.TaskContext) (retErr error) {
 				)
 				continue
 			}
+
+			// SKU 补齐：从 mapping.sku（DSCO -> 领星）取值；无映射则不传（保持空字符串）。
+			sku := ""
+			if v, ok := ctx.Config.Mapping.SKU[msku]; ok {
+				sku = strings.TrimSpace(v)
+			}
 			createItems = append(createItems, lingxing.CreateOrderItemV2{
+				SKU:       sku,
 				MSKU:      msku,
 				Quantity:  li.Quantity,
 				UnitPrice: unitPrice,
@@ -345,18 +353,19 @@ func (d *Domain) PushToLingXing(ctx integration.TaskContext) (retErr error) {
 				{
 					PlatformOrderNo: order.PoNumber,
 					// 收件信息
-					ReceiverName:        name,                                               // 收件人
-					BuyerName:           name,                                               // 买家姓名（暂与收件人相同）
-					BuyerNote:           strings.TrimSpace(derefString(order.BuyerMessage)), // 买家留言
-					BuyerEmail:          strings.TrimSpace(derefString(addr.Email)),         // 买家邮箱
-					ReceiverMobile:      strings.TrimSpace(derefString(addr.Phone)),         // 手机号
-					ReceiverCountryCode: country,                                            // 国家代码
-					StateOrRegion:       strings.TrimSpace(derefString(addr.State)),         // 省/州
-					City:                strings.TrimSpace(addr.City),                       // 城市
-					District:            strings.TrimSpace(derefString(addr.Region)),        // 区/县行政单位
-					AddressLine1:        line1,                                              // 地址行1
-					PostalCode:          addr.Postal,                                        // 邮编
-					DoorplateNo:         strings.TrimSpace(derefString(addr.Address2)),      // 门牌号（地址行2）
+					ReceiverName:        name,                                          // 收件人
+					BuyerName:           name,                                          // 买家姓名（暂与收件人相同）
+					BuyerEmail:          strings.TrimSpace(derefString(addr.Email)),    // 买家邮箱
+					ReceiverMobile:      strings.TrimSpace(derefString(addr.Phone)),    // 手机号
+					ReceiverCountryCode: country,                                       // 国家代码
+					StateOrRegion:       strings.TrimSpace(derefString(addr.State)),    // 省/州
+					City:                strings.TrimSpace(addr.City),                  // 城市
+					District:            strings.TrimSpace(derefString(addr.Region)),   // 区/县行政单位
+					AddressLine1:        line1,                                         // 地址行1
+					PostalCode:          addr.Postal,                                   // 邮编
+					DoorplateNo:         strings.TrimSpace(derefString(addr.Address2)), // 门牌号（地址行2）
+					// BuyerNote:           strings.TrimSpace(derefString(order.BuyerMessage)), // 买家留言
+
 					// 仓库和物流信息
 					WID:             wid,             // 领星仓库ID
 					LogisticsTypeID: logisticsTypeID, // 领星物流 type_id
