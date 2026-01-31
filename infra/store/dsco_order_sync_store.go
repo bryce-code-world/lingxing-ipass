@@ -132,10 +132,10 @@ func (s *DSCOOrderSyncStore) List(ctx context.Context, f DSCOOrderSyncListFilter
 		q = q.Where("shipment = ?", strings.TrimSpace(f.Shipment))
 	}
 	if strings.TrimSpace(f.Tracking) != "" {
-		q = q.Where("shipped_tracking_no = ?", strings.TrimSpace(f.Tracking))
+		q = q.Where("shipped_tracking_no ILIKE ?", "%"+strings.TrimSpace(f.Tracking)+"%")
 	}
 	if strings.TrimSpace(f.InvoiceID) != "" {
-		q = q.Where("dsco_invoice_id = ?", strings.TrimSpace(f.InvoiceID))
+		q = q.Where("dsco_invoice_id ILIKE ?", "%"+strings.TrimSpace(f.InvoiceID)+"%")
 	}
 
 	var total int64

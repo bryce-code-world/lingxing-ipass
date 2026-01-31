@@ -76,7 +76,7 @@ func TestBoarding_Order_Method1_GetOrderObject(t *testing.T) {
 	defer cancel()
 
 	for _, no := range orderTestOrderNumbers {
-		o, _, err := cli.Order.GetByKeyWithRawBody(ctx, orderKeyForGetOrderObject, no, nil)
+		o, res, err := cli.Order.GetByKeyWithRawBody(ctx, orderKeyForGetOrderObject, no, nil)
 		if err != nil {
 			t.Fatalf("GetByKey orderKey=%s value=%s: %v", orderKeyForGetOrderObject, no, err)
 		}
@@ -87,9 +87,9 @@ func TestBoarding_Order_Method1_GetOrderObject(t *testing.T) {
 		// fmt.Printf("order: %+v\n", o.LineItems)
 		// fmt.Println(*o.Shipping.Country, *o.Shipping.State, o.Shipping.City, o.Shipping.Address, *o.Shipping.Name)
 		// fmt.Println(*o.DscoRetailerID, o.PoNumber, *o.RequestedWarehouseCode, *o.ShipWarehouseCode)
-		// fmt.Println("Raw response:", res)
+		fmt.Println("Raw response:", res)
 		fmt.Println(o.PoNumber, o.DscoStatus, o.Packages,
-			*o.Shipping.Phone, *o.Shipping.Name, o.Shipping.Postal)
+			*o.Shipping.Phone, *o.Shipping.Name, o.Shipping.Postal, *o.BuyerMessage)
 		// for _, li := range o.LineItems {
 		// 	t.Logf("lineItem: %+v", li)
 		// }

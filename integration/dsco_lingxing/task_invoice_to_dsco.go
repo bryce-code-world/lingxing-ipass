@@ -3,7 +3,6 @@ package dsco_lingxing
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"math"
 	"strings"
 	"time"
@@ -22,14 +21,18 @@ import (
 // - 回传 invoice 成功后将状态推进到 5（完成态）。
 //
 // 关键点：
-// - 幂等：若本地 dsco_invoice_id 已有值，则认为已回传过 invoice，直接跳过。
+// - 幂等：若本地 dsco_invoice_id 已有值，则认为该 poNumber 已回传过发票，直接跳过。
 // - 发票数据来源：
 //   - 数量：优先使用 WmsOrderList 的 ProductInfo（以实际出库为准）。
 //   - 单价：优先从 DSCO 原始订单行项目中挑选（见 pickUnitPrice），以 DSCO 订单字段为准。
 //   - 订单总金额：按“数量 * 单价”汇总，并做 2 位小数 round。
 //
 // - invoiceDate：优先 DeliveredAt；为空则用 StockDeliveredAt 兜底（已确认）。
-// - invoiceId：一期默认 invoiceId = poNumber；若未来一单多出库单，可切换为 poNumber-序号（已确认）。
+// - 发票回传口径（一期最新确认）：
+//   - 以 poNumber 为维度：同一 poNumber 即使对应领星拆单/多行，也只回传“1 张汇总发票”给 DSCO。
+//   - 前置条件：poNumber 下所有 SKU 均已发货（以 WmsOrderList 聚合数量 >= DSCO 原始订单数量 为准）。
+//   - invoiceId：固定 invoiceId = poNumber。
+//   - trackingNumber：若存在多运单号，则用逗号拼接（便于排查；如 DSCO 侧不接受可再调整）。
 func (d *Domain) InvoiceToDSCO(ctx integration.TaskContext) (retErr error) {
 	taskCtx := ctx.Ctx
 	if taskCtx == nil {
@@ -85,6 +88,13 @@ func (d *Domain) InvoiceToDSCO(ctx integration.TaskContext) (retErr error) {
 		return retErr
 	}
 
+	// SKU 反向映射：领星 SKU -> DSCO partnerSku（mapping.sku 的反向映射；缺省同名直传）。
+	reverseSKU, err := buildReverseSKUMap(ctx.Config)
+	if err != nil {
+		retErr = err
+		return retErr
+	}
+
 	var invs []dsco.Invoice
 	var toUpdate []struct {
 		po        string
@@ -105,8 +115,9 @@ func (d *Domain) InvoiceToDSCO(ctx integration.TaskContext) (retErr error) {
 			)
 			continue
 		}
-		// 0) 幂等：已写入 dsco_invoice_id 的订单视为已回传过 invoice，直接跳过。
-		if row.DSCOInvoiceID != "" {
+
+		// 0) 幂等：已写入 dsco_invoice_id 的订单视为已回传过发票，直接跳过。
+		if strings.TrimSpace(row.DSCOInvoiceID) != "" {
 			skip++
 			logger.Info(taskCtx, "order done",
 				append(base,
@@ -155,7 +166,7 @@ func (d *Domain) InvoiceToDSCO(ctx integration.TaskContext) (retErr error) {
 
 		wmsOrders, _, err := lx.Warehouse.WmsOrderList(taskCtx, lingxing.WmsOrderListRequest{
 			Page:               1,
-			PageSize:           20,
+			PageSize:           200,
 			SIDArr:             []int{sid},
 			PlatformOrderNoArr: []string{po},
 		})
@@ -173,32 +184,43 @@ func (d *Domain) InvoiceToDSCO(ctx integration.TaskContext) (retErr error) {
 			continue
 		}
 
-		// 4) invoiceDate 口径：优先 DeliveredAt；为空则用 StockDeliveredAt 兜底（已确认）
-		shipDate := time.Now().UTC().Format(time.RFC3339)
-		if rawTime := wmsOrders[0].DeliveredAt; rawTime != "" {
-			if t, err := parseLingXingDateTimeToRFC3339UTC(rawTime); err == nil {
-				shipDate = t
-			}
-		} else if rawTime := wmsOrders[0].StockDeliveredAt; rawTime != "" {
-			if t, err := parseLingXingDateTimeToRFC3339UTC(rawTime); err == nil {
-				shipDate = t
-			}
-		}
-
-		// 5) tracking：发票回传也带 trackingNumber（从 WMS 订单取）
-		tracking := wmsOrders[0].TrackingNo
-
-		// 6) dscoItemId 映射：用于发票行项目（尽量补齐 dscoItemId）
+		// 4) DSCO 行项目口径（以 partnerSku 为主键）：
+		// - expectedQty：用于判断“是否全部已发货”
+		// - dscoItemId/lineNumber：用于发票行项目（尽量补齐以提升 DSCO 侧匹配成功率）
+		expectedQtyByPartner := map[string]int{}
 		dscoItemIDByPartner := map[string]string{}
+		dscoItemIDConflict := map[string]bool{}
+		lineNumberByPartner := map[string]int{}
+		lineNumberConflict := map[string]bool{}
 		for _, li := range dscoOrder.LineItems {
-			p := ""
-			if li.PartnerSKU != nil {
-				p = *li.PartnerSKU
+			partner := ""
+			if li.PartnerSKU != nil && strings.TrimSpace(*li.PartnerSKU) != "" {
+				partner = strings.TrimSpace(*li.PartnerSKU)
+			} else if li.SKU != nil && strings.TrimSpace(*li.SKU) != "" {
+				partner = strings.TrimSpace(*li.SKU)
 			}
-			if p != "" && li.DscoItemID != nil {
-				dscoItemIDByPartner[p] = *li.DscoItemID
+			if partner == "" {
+				continue
+			}
+			if li.Quantity > 0 {
+				expectedQtyByPartner[partner] += li.Quantity
+			}
+			if li.DscoItemID != nil && strings.TrimSpace(*li.DscoItemID) != "" {
+				id := strings.TrimSpace(*li.DscoItemID)
+				if prev, ok := dscoItemIDByPartner[partner]; ok && prev != id {
+					dscoItemIDConflict[partner] = true
+				} else {
+					dscoItemIDByPartner[partner] = id
+				}
+			}
+			if li.LineNumber != nil && *li.LineNumber > 0 {
+				if prev, ok := lineNumberByPartner[partner]; ok && prev != *li.LineNumber {
+					lineNumberConflict[partner] = true
+				}
+				lineNumberByPartner[partner] = *li.LineNumber
 			}
 		}
+
 		priceByPartner := map[string]float64{}
 		for _, li := range dscoOrder.LineItems {
 			p := ""
@@ -215,27 +237,133 @@ func (d *Domain) InvoiceToDSCO(ctx integration.TaskContext) (retErr error) {
 			}
 		}
 
-		// 7) 生成发票行项目与总金额：
-		// - 数量以 WMS 出库为准
+		// 5) 币种：默认 USD；若 DSCO 原始订单带 currencyCode 则使用它
+		currency := "USD"
+		if dscoOrder.CurrencyCode != nil && *dscoOrder.CurrencyCode != "" {
+			currency = *dscoOrder.CurrencyCode
+		}
+
+		// 6) 计算“实际已发货数量”（WMS 聚合）与运单号集合：
+		// - shippedQty：用于判断“是否全部已发货”
+		// - tracking：回传发票带上运单号（若多个用逗号拼接）
+		shippedQtyByPartner := map[string]int{}
+		trackingList := make([]string, 0, len(wmsOrders))
+		var latestInvoiceDate string
+		for _, w := range wmsOrders {
+			if t := strings.TrimSpace(w.TrackingNo); t != "" {
+				trackingList = append(trackingList, t)
+			}
+			// invoiceDate：取“最晚一次发货时间”（优先 DeliveredAt，否则 StockDeliveredAt）
+			var chosen string
+			if rawTime := strings.TrimSpace(w.DeliveredAt); rawTime != "" {
+				if t, err := parseLingXingDateTimeToRFC3339UTC(rawTime); err == nil {
+					chosen = t
+				}
+			} else if rawTime := strings.TrimSpace(w.StockDeliveredAt); rawTime != "" {
+				if t, err := parseLingXingDateTimeToRFC3339UTC(rawTime); err == nil {
+					chosen = t
+				}
+			}
+			if chosen != "" {
+				// RFC3339 字符串同一时区下可按字典序比较，但这里仍以字符串比较做最小实现。
+				if latestInvoiceDate == "" || chosen > latestInvoiceDate {
+					latestInvoiceDate = chosen
+				}
+			}
+			for _, p := range w.ProductInfo {
+				lxSKU := strings.TrimSpace(p.SKU)
+				if lxSKU == "" || p.Count <= 0 {
+					continue
+				}
+				dscoPartner := strings.TrimSpace(reverseSKU[lxSKU])
+				if dscoPartner == "" {
+					dscoPartner = lxSKU
+				}
+				if dscoPartner == "" {
+					continue
+				}
+				shippedQtyByPartner[dscoPartner] += p.Count
+			}
+		}
+		if latestInvoiceDate == "" {
+			latestInvoiceDate = time.Now().UTC().Format(time.RFC3339)
+		}
+		trackingJoined := strings.Join(uniqueNonEmptyStrings(trackingList), ",")
+
+		// 7) 全量发货判断：poNumber 下所有 SKU 均已发货才允许回传发票
+		notReady := false
+		for partner, expected := range expectedQtyByPartner {
+			if expected <= 0 {
+				continue
+			}
+			if shippedQtyByPartner[partner] < expected {
+				notReady = true
+				break
+			}
+		}
+		if notReady {
+			skip++
+			logger.Info(taskCtx, "order done",
+				append(base,
+					"task", "invoice_to_dsco",
+					"po_number", po,
+					"result", "skip",
+					"reason", "not_fully_shipped",
+					"expected_qty", integration.JSONForLog(expectedQtyByPartner),
+					"shipped_qty", integration.JSONForLog(shippedQtyByPartner),
+					"wms_orders_raw", integration.JSONForLog(wmsOrders),
+				)...,
+			)
+			continue
+		}
+
+		// 8) 组装“汇总发票”：
+		// - 发票行数量以 DSCO 订单数量为准（已确认“必须全量发货”后再回传发票）
 		// - 单价以 DSCO 原始订单为准（pickUnitPrice）
+		// - 如缺少单价导致无法计算总额，则跳过（避免回传不完整发票）
+		var missingPrice []string
 		var lineItems []dsco.InvoiceLineItem
-		var total float64
-		for _, p := range wmsOrders[0].ProductInfo {
-			dscoPartner := p.SKU
-			unit := priceByPartner[dscoPartner]
+		var totalAmount float64
+		for partner, expected := range expectedQtyByPartner {
+			if expected <= 0 {
+				continue
+			}
+			unit := priceByPartner[partner]
 			if unit <= 0 {
+				missingPrice = append(missingPrice, partner)
 				continue
 			}
 			line := dsco.InvoiceLineItem{
-				PartnerSKU: dscoPartner,
-				Quantity:   p.Count,
+				PartnerSKU: partner,
+				Quantity:   expected,
 				UnitPrice:  unit,
 			}
-			if id := dscoItemIDByPartner[dscoPartner]; id != "" {
-				line.DscoItemID = id
+			if !dscoItemIDConflict[partner] {
+				if id := dscoItemIDByPartner[partner]; id != "" {
+					line.DscoItemID = id
+				}
+			}
+			if !lineNumberConflict[partner] {
+				if n := lineNumberByPartner[partner]; n > 0 {
+					line.LineNumber = n
+				}
 			}
 			lineItems = append(lineItems, line)
-			total += float64(p.Count) * unit
+			totalAmount += float64(expected) * unit
+		}
+		if len(missingPrice) > 0 {
+			skip++
+			logger.Info(taskCtx, "order done",
+				append(base,
+					"task", "invoice_to_dsco",
+					"po_number", po,
+					"result", "skip",
+					"reason", "missing_unit_price",
+					"missing_partner_sku", strings.Join(uniqueNonEmptyStrings(missingPrice), ","),
+					"dsco_raw", integration.JSONForLog(row.Payload),
+				)...,
+			)
+			continue
 		}
 		if len(lineItems) == 0 {
 			skip++
@@ -244,38 +372,24 @@ func (d *Domain) InvoiceToDSCO(ctx integration.TaskContext) (retErr error) {
 					"task", "invoice_to_dsco",
 					"po_number", po,
 					"result", "skip",
-					"reason", "no_line_items_to_invoice",
-					"wms_order_raw", integration.JSONForLog(wmsOrders[0]),
+					"reason", "no_invoice_line_items",
 					"dsco_raw", integration.JSONForLog(row.Payload),
+					"wms_orders_raw", integration.JSONForLog(wmsOrders),
 				)...,
 			)
 			continue
 		}
 
-		// 8) 币种：默认 USD；若 DSCO 原始订单带 currencyCode 则使用它
-		currency := "USD"
-		if dscoOrder.CurrencyCode != nil && *dscoOrder.CurrencyCode != "" {
-			currency = *dscoOrder.CurrencyCode
-		}
-
-		// Round total to 2 decimals to be safe.
-		total = math.Round(total*100) / 100
-
-		// 9) invoiceId：一期默认 invoiceId = poNumber；多出库单时可切换为 poNumber-序号（MVP 先写 1）
+		totalAmount = math.Round(totalAmount*100) / 100
 		invoiceID := po
-		if len(wmsOrders) > 1 {
-			// Future-proof: when a PO has multiple WMS orders, use a stable 1-based sequence.
-			invoiceID = fmt.Sprintf("%s-%d", po, 1)
-		}
-		// 10) 组装 DSCO 发票对象
 		inv := dsco.Invoice{
 			InvoiceID:           invoiceID,
 			PoNumber:            po,
 			ConsumerOrderNumber: derefString(dscoOrder.ConsumerOrderNumber),
-			TrackingNumber:      tracking,
-			InvoiceDate:         shipDate,
+			TrackingNumber:      trackingJoined,
+			InvoiceDate:         latestInvoiceDate,
 			CurrencyCode:        currency,
-			TotalAmount:         total,
+			TotalAmount:         totalAmount,
 			LineItems:           lineItems,
 		}
 		invs = append(invs, inv)
@@ -283,14 +397,13 @@ func (d *Domain) InvoiceToDSCO(ctx integration.TaskContext) (retErr error) {
 			po        string
 			invoiceID string
 		}{po: po, invoiceID: invoiceID})
-
 		logger.Info(taskCtx, "order prepared",
 			append(base,
 				"task", "invoice_to_dsco",
 				"po_number", po,
 				"invoice_id", invoiceID,
 				"invoice_request", integration.JSONForLog(inv),
-				"wms_order_raw", integration.JSONForLog(wmsOrders[0]),
+				"wms_orders_raw", integration.JSONForLog(wmsOrders),
 			)...,
 		)
 	}

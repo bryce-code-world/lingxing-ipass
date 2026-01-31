@@ -24,6 +24,7 @@ import (
 //     - dscoStatus == shipped/completed：表示已进入更后阶段，同样直接推进到 3。
 //     - 其他状态：才考虑继续走 ACK。
 //  2. 对“仍需 ACK”的订单，再查领星订单状态（5/6 才允许 ACK），避免过早 ACK。
+//     - 注意：同一 poNumber 可能在领星侧拆成多条子订单；此时必须“全部子订单”满足 5/6 才允许 ACK。
 //  3. 将需要 ACK 的订单组装为 DSCO Acknowledge 批量请求，调用 /order/acknowledge。
 func (d *Domain) AckToDSCO(ctx integration.TaskContext) (retErr error) {
 	taskCtx := ctx.Ctx
@@ -163,7 +164,7 @@ func (d *Domain) AckToDSCO(ctx integration.TaskContext) (retErr error) {
 
 	// 4) 批量查询领星订单状态（避免逐单查询触发 API 限制）：
 	// - 仅对“确实需要 ACK”的订单查询领星状态。
-	detailsByPO := make(map[string]lingxing.OrderDetailV2, len(needAck))
+	detailsByPO := make(map[string][]lingxing.OrderDetailV2, len(needAck))
 	includeDelete := true
 	const maxBatch = 50
 	for _, chunk := range chunkStrings(uniqueNonEmptyStrings(needAck), maxBatch) {
@@ -179,14 +180,14 @@ func (d *Domain) AckToDSCO(ctx integration.TaskContext) (retErr error) {
 			for _, po := range chunk {
 				detail, derr := lx.Order.GetOrderDetailV2(taskCtx, lingxing.OrderDetailV2Request{PlatformOrderNo: po})
 				if derr == nil {
-					detailsByPO[po] = detail
+					detailsByPO[po] = append(detailsByPO[po], detail)
 				}
 			}
 			continue
 		}
 		for _, detail := range out.List {
 			if po := poNumberFromLingXingOrderDetail(detail); po != "" {
-				detailsByPO[po] = detail
+				detailsByPO[po] = append(detailsByPO[po], detail)
 			}
 		}
 	}
@@ -195,8 +196,8 @@ func (d *Domain) AckToDSCO(ctx integration.TaskContext) (retErr error) {
 	var reqs []dsco.OrderAcknowledgeRequest
 	var toUpdate []string
 	for _, po := range needAck {
-		detail, ok := detailsByPO[po]
-		if !ok {
+		details := detailsByPO[po]
+		if len(details) == 0 {
 			skip++
 			logger.Info(taskCtx, "order done",
 				append(base,
@@ -209,7 +210,16 @@ func (d *Domain) AckToDSCO(ctx integration.TaskContext) (retErr error) {
 			)
 			continue
 		}
-		if detail.Status != lingxing.MultiPlatformOrderStatusPendingShipment && detail.Status != lingxing.MultiPlatformOrderStatusShipped {
+
+		ready := true
+		statuses := make([]int, 0, len(details))
+		for _, d := range details {
+			statuses = append(statuses, int(d.Status))
+			if d.Status != lingxing.MultiPlatformOrderStatusPendingShipment && d.Status != lingxing.MultiPlatformOrderStatusShipped {
+				ready = false
+			}
+		}
+		if !ready {
 			skip++
 			logger.Info(taskCtx, "order done",
 				append(base,
@@ -217,8 +227,9 @@ func (d *Domain) AckToDSCO(ctx integration.TaskContext) (retErr error) {
 					"po_number", po,
 					"result", "skip",
 					"reason", "lingxing_status_not_ready_for_ack",
-					"lingxing_status", int(detail.Status),
-					"lingxing_raw", integration.JSONForLog(detail),
+					"lingxing_statuses", statuses,
+					"lingxing_count", len(details),
+					"lingxing_raw", integration.JSONForLog(details),
 					"dsco_payload", integration.JSONForLog(payloadByPO[po]),
 				)...,
 			)
@@ -267,7 +278,11 @@ func (d *Domain) AckToDSCO(ctx integration.TaskContext) (retErr error) {
 			continue
 		}
 		okCount++
-		detail := detailsByPO[po]
+		details := detailsByPO[po]
+		statuses := make([]int, 0, len(details))
+		for _, d := range details {
+			statuses = append(statuses, int(d.Status))
+		}
 		dscoSt := ""
 		dscoRaw := ""
 		if o, ok := dscoByPO[po]; ok {
@@ -283,8 +298,9 @@ func (d *Domain) AckToDSCO(ctx integration.TaskContext) (retErr error) {
 				"dsco_status", dscoSt,
 				"dsco_raw", dscoRaw,
 				"dsco_payload", integration.JSONForLog(payloadByPO[po]),
-				"lingxing_status", int(detail.Status),
-				"lingxing_raw", integration.JSONForLog(detail),
+				"lingxing_statuses", statuses,
+				"lingxing_count", len(details),
+				"lingxing_raw", integration.JSONForLog(details),
 				"new_status", 3,
 			)...,
 		)

@@ -13,6 +13,26 @@ import (
 	"lingxingipass/integration"
 )
 
+func normalizeTrackingJoined(values []string) string {
+	var tokens []string
+	for _, v := range values {
+		for _, t := range strings.FieldsFunc(v, func(r rune) bool {
+			switch r {
+			case ',', '，', ';', '；', ' ', '\t', '\n', '\r':
+				return true
+			default:
+				return false
+			}
+		}) {
+			if s := strings.TrimSpace(t); s != "" {
+				tokens = append(tokens, s)
+			}
+		}
+	}
+	// 统一用英文逗号拼接，便于幂等与 Admin 筛选。
+	return strings.Join(uniqueNonEmptyStrings(tokens), ",")
+}
+
 // ShipToDSCO 将领星侧的发货信息回传给 DSCO（Shipment CreateSmallBatch）。
 //
 // 状态机（一期口径）：
@@ -25,10 +45,11 @@ import (
 //     - dscoStatus == shipment_pending：表示 DSCO 等待发货回传，本任务可以继续调用 DSCO shipment 接口。
 //     - 其他状态：本轮跳过（避免乱回传）。
 //  2. 幂等：若本地 shipped_tracking_no 已有值，则认为已回传过 shipment，直接跳过。
-//  3. 批量查询领星订单详情（trackingNo），避免逐单调用触发限流。
-//  4. shipDate：优先使用 WmsOrder.DeliveredAt；若为空则用 StockDeliveredAt 兜底（已确认）。
-//  5. 多出库单：WmsOrderList 返回多条时，按“取第一条”回传（已确认）。
+//  3. 使用领星 WmsOrderList 获取发货数据（可能多条出库单/多运单号），按 trackingNo 聚合后回传 DSCO。
+//  4. shipDate：每个 trackingNo 优先取 DeliveredAt；为空则用 StockDeliveredAt 兜底（已确认）。
+//  5. SKU 映射：领星 SKU 通过 mapping.sku 的反向映射得到 DSCO partnerSku（缺省同名直传）。
 //  6. SID：WmsOrderList 查询需要 sid_arr；sid 从 mapping.shop 映射值解析得到（已确认）。
+//  7. 本地记录：回传成功后把 trackingNo（可能多条，用英文逗号拼接）写回 shipped_tracking_no，便于幂等与筛选。
 func (d *Domain) ShipToDSCO(ctx integration.TaskContext) (retErr error) {
 	taskCtx := ctx.Ctx
 	if taskCtx == nil {
@@ -103,41 +124,12 @@ func (d *Domain) ShipToDSCO(ctx integration.TaskContext) (retErr error) {
 		)...,
 	)
 
-	// 4) 批量查询领星订单详情（主要为了 trackingNo），避免逐单 GetOrderDetailV2 触发限流。
-	poNumbers = uniqueNonEmptyStrings(poNumbers)
-	detailsByPO := make(map[string]lingxing.OrderDetailV2, len(poNumbers))
-	includeDelete := true
-	const maxBatch = 50
-	for _, chunk := range chunkStrings(poNumbers, maxBatch) {
-		out, err := lx.Order.ListOrdersV2(taskCtx, lingxing.OrderListV2Request{
-			Offset:           0,
-			Length:           len(chunk),
-			PlatformOrderNos: chunk,
-			IncludeDelete:    &includeDelete,
-		})
-		if err != nil {
-			logger.Warn(taskCtx, "lingxing list orders failed, fallback to per-order check", "err", err)
-			for _, po := range chunk {
-				detail, derr := lx.Order.GetOrderDetailV2(taskCtx, lingxing.OrderDetailV2Request{PlatformOrderNo: po})
-				if derr == nil {
-					detailsByPO[po] = detail
-				}
-			}
-			continue
-		}
-		for _, detail := range out.List {
-			if po := poNumberFromLingXingOrderDetail(detail); po != "" {
-				detailsByPO[po] = detail
-			}
-		}
+	// SKU 反向映射：领星 SKU -> DSCO partnerSku（mapping.sku 的反向映射；缺省同名直传）。
+	reverseSKU, err := buildReverseSKUMap(ctx.Config)
+	if err != nil {
+		retErr = err
+		return retErr
 	}
-	logger.Info(taskCtx, "lingxing orders fetched",
-		append(base,
-			"task", "ship_to_dsco",
-			"po_count", len(poNumbers),
-			"fetched", len(detailsByPO),
-		)...,
-	)
 
 	var batch []dsco.ShipmentsForUpdate
 	var toUpdate []struct {
@@ -180,7 +172,7 @@ func (d *Domain) ShipToDSCO(ctx integration.TaskContext) (retErr error) {
 			case "shipped", "completed":
 				tracking := ""
 				if len(o.Packages) > 0 {
-					tracking = strings.TrimSpace(o.Packages[0].TrackingNumber)
+					tracking = normalizeTrackingJoined([]string{o.Packages[0].TrackingNumber})
 				}
 				if uerr := d.orderStore.UpdateStatusAndFields(taskCtx, po, 4, tracking, ""); uerr != nil {
 					fail++
@@ -273,89 +265,107 @@ func (d *Domain) ShipToDSCO(ctx integration.TaskContext) (retErr error) {
 			continue
 		}
 
-		// 4.1) 从批量查询结果中提取 trackingNo（无运单号则暂不回传）
-		detail, ok := detailsByPO[po]
-		if !ok {
-			skip++
-			logger.Info(taskCtx, "order done",
-				append(base,
-					"task", "ship_to_dsco",
-					"po_number", po,
-					"result", "skip",
-					"reason", "lingxing_order_not_fetched",
-				)...,
-			)
-			continue
-		}
-		tracking := strings.TrimSpace(detail.LogisticsInfo.TrackingNo)
-		if tracking == "" {
-			skip++
-			logger.Info(taskCtx, "order done",
-				append(base,
-					"task", "ship_to_dsco",
-					"po_number", po,
-					"result", "skip",
-					"reason", "lingxing_tracking_empty",
-					"lingxing_status", int(detail.Status),
-					"lingxing_raw", integration.JSONForLog(detail),
-				)...,
-			)
-			continue
-		}
-
-		// 5) DSCO shipMethod 口径：优先 shipMethod；没有则用 shippingServiceLevelCode（已确认）
+		// 4) DSCO shipMethod 口径：优先 shipMethod；没有则用 shippingServiceLevelCode（已确认）
 		dscoShipMethod := getDSCOShipMethod(dscoOrder)
 		if dscoShipMethod == "" {
 			dscoShipMethod = getDSCOShippingServiceLevelCode(dscoOrder)
 		}
 
-		// 6) shipDate 口径：优先 DeliveredAt；为空则用 StockDeliveredAt 兜底（已确认）
-		shipDateRFC3339 := ""
-		orders, _, err := lx.Warehouse.WmsOrderList(taskCtx, lingxing.WmsOrderListRequest{
-			Page:               1,
-			PageSize:           20,
-			SIDArr:             []int{sid},
-			PlatformOrderNoArr: []string{po},
-		})
-		if err == nil && len(orders) > 0 {
-			rawTime := orders[0].DeliveredAt
-			if rawTime != "" {
-				if t, err := parseLingXingDateTimeToRFC3339UTC(rawTime); err == nil {
-					shipDateRFC3339 = t
-				}
-			} else if rawTime := orders[0].StockDeliveredAt; rawTime != "" {
-				if t, err := parseLingXingDateTimeToRFC3339UTC(rawTime); err == nil {
-					shipDateRFC3339 = t
-				}
-			}
-		}
-
-		// 7) dscoItemId 映射：用于 shipment 行项目（尽量补齐 dscoItemId）
-		dscoItemIDByPartner := map[string]string{}
-		for _, li := range dscoOrder.LineItems {
-			p := ""
-			if li.PartnerSKU != nil {
-				p = *li.PartnerSKU
-			}
-			if p != "" && li.DscoItemID != nil {
-				dscoItemIDByPartner[p] = *li.DscoItemID
-			}
-		}
-
-		lineItems := []dsco.ShipmentLineItemForUpdate{}
-
-		// 8) 行项目数量口径：
-		// - 优先使用 WmsOrderList 的 ProductInfo（更接近真实出库数量）。
-		// - 若查不到，则退回使用领星订单详情 ItemInfo 数量。
+		// 5) 查询领星出库单：运单号 + 发货时间 + 实发数量（可能返回多条）
 		wmsOrders, _, err := lx.Warehouse.WmsOrderList(taskCtx, lingxing.WmsOrderListRequest{
 			Page:               1,
-			PageSize:           20,
+			PageSize:           200,
 			SIDArr:             []int{sid},
 			PlatformOrderNoArr: []string{po},
 		})
-		if err == nil && len(wmsOrders) > 0 && len(wmsOrders[0].ProductInfo) > 0 {
-			for _, p := range wmsOrders[0].ProductInfo {
-				dscoPartner := p.SKU
+		if err != nil || len(wmsOrders) == 0 {
+			skip++
+			logger.Info(taskCtx, "order done",
+				append(base,
+					"task", "ship_to_dsco",
+					"po_number", po,
+					"result", "skip",
+					"reason", "lingxing_wms_order_not_found",
+					"err", err,
+				)...,
+			)
+			continue
+		}
+
+		// 6) dscoItemId/lineNumber 映射：用于 shipment 行项目（尽量补齐以提升 DSCO 侧匹配成功率）
+		dscoItemIDByPartner := map[string]string{}
+		lineNumberByPartner := map[string]int{}
+		lineNumberConflict := map[string]bool{}
+		for _, li := range dscoOrder.LineItems {
+			partner := ""
+			if li.PartnerSKU != nil && strings.TrimSpace(*li.PartnerSKU) != "" {
+				partner = strings.TrimSpace(*li.PartnerSKU)
+			} else if li.SKU != nil && strings.TrimSpace(*li.SKU) != "" {
+				partner = strings.TrimSpace(*li.SKU)
+			}
+			if partner == "" {
+				continue
+			}
+			if li.DscoItemID != nil && strings.TrimSpace(*li.DscoItemID) != "" {
+				dscoItemIDByPartner[partner] = strings.TrimSpace(*li.DscoItemID)
+			}
+			if li.LineNumber != nil && *li.LineNumber > 0 {
+				if prev, ok := lineNumberByPartner[partner]; ok && prev != *li.LineNumber {
+					lineNumberConflict[partner] = true
+				}
+				lineNumberByPartner[partner] = *li.LineNumber
+			}
+		}
+
+		// 7) 组装 DSCO shipment：按 trackingNo 聚合（同一 PO 可能多运单号/多出库单）。
+		type shipAgg struct {
+			shipDate string
+			items    map[string]*dsco.ShipmentLineItemForUpdate // partnerSku -> item (sum quantity)
+		}
+		shipAggByTracking := map[string]*shipAgg{}
+
+		for _, w := range wmsOrders {
+			tracking := strings.TrimSpace(w.TrackingNo)
+			if tracking == "" {
+				continue
+			}
+			agg := shipAggByTracking[tracking]
+			if agg == nil {
+				agg = &shipAgg{items: map[string]*dsco.ShipmentLineItemForUpdate{}}
+				shipAggByTracking[tracking] = agg
+			}
+
+			// shipDate：优先 DeliveredAt；为空则用 StockDeliveredAt 兜底（已确认）
+			if agg.shipDate == "" {
+				if rawTime := strings.TrimSpace(w.DeliveredAt); rawTime != "" {
+					if t, err := parseLingXingDateTimeToRFC3339UTC(rawTime); err == nil {
+						agg.shipDate = t
+					}
+				} else if rawTime := strings.TrimSpace(w.StockDeliveredAt); rawTime != "" {
+					if t, err := parseLingXingDateTimeToRFC3339UTC(rawTime); err == nil {
+						agg.shipDate = t
+					}
+				}
+			}
+
+			for _, p := range w.ProductInfo {
+				lxSKU := strings.TrimSpace(p.SKU)
+				if lxSKU == "" || p.Count <= 0 {
+					continue
+				}
+				dscoPartner := strings.TrimSpace(reverseSKU[lxSKU])
+				if dscoPartner == "" {
+					dscoPartner = lxSKU
+				}
+				if dscoPartner == "" {
+					continue
+				}
+
+				if it, ok := agg.items[dscoPartner]; ok {
+					it.Quantity += p.Count
+					continue
+				}
+
 				li := dsco.ShipmentLineItemForUpdate{
 					Quantity:   p.Count,
 					PartnerSKU: dscoPartner,
@@ -363,22 +373,52 @@ func (d *Domain) ShipToDSCO(ctx integration.TaskContext) (retErr error) {
 				if id := dscoItemIDByPartner[dscoPartner]; id != "" {
 					li.DscoItemID = id
 				}
-				lineItems = append(lineItems, li)
-			}
-		} else {
-			for _, it := range detail.ItemInfo {
-				dscoPartner := it.MSKU
-				li := dsco.ShipmentLineItemForUpdate{
-					Quantity:   it.Quantity,
-					PartnerSKU: dscoPartner,
+				if !lineNumberConflict[dscoPartner] {
+					if n := lineNumberByPartner[dscoPartner]; n > 0 {
+						nn := n
+						li.LineNumber = &nn
+					}
 				}
-				if id := dscoItemIDByPartner[dscoPartner]; id != "" {
-					li.DscoItemID = id
-				}
-				lineItems = append(lineItems, li)
+				agg.items[dscoPartner] = &li
 			}
 		}
-		if len(lineItems) == 0 {
+
+		if len(shipAggByTracking) == 0 {
+			skip++
+			logger.Info(taskCtx, "order done",
+				append(base,
+					"task", "ship_to_dsco",
+					"po_number", po,
+					"result", "skip",
+					"reason", "no_tracking_or_items_in_wms_orders",
+					"dsco_raw", integration.JSONForLog(row.Payload),
+					"wms_orders_raw", integration.JSONForLog(wmsOrders),
+				)...,
+			)
+			continue
+		}
+
+		dscoWarehouseCode := getDSCOWarehouseCode(dscoOrder)
+		var shipments []dsco.ShipmentForUpdate
+		trackingList := make([]string, 0, len(shipAggByTracking))
+		for tracking, agg := range shipAggByTracking {
+			trackingList = append(trackingList, tracking)
+			var lineItems []dsco.ShipmentLineItemForUpdate
+			for _, it := range agg.items {
+				lineItems = append(lineItems, *it)
+			}
+			if len(lineItems) == 0 {
+				continue
+			}
+			shipments = append(shipments, dsco.ShipmentForUpdate{
+				TrackingNumber: tracking,
+				ShipDate:       agg.shipDate,
+				ShipMethod:     dscoShipMethod,
+				WarehouseCode:  dscoWarehouseCode,
+				LineItems:      lineItems,
+			})
+		}
+		if len(shipments) == 0 {
 			skip++
 			logger.Info(taskCtx, "order done",
 				append(base,
@@ -387,42 +427,30 @@ func (d *Domain) ShipToDSCO(ctx integration.TaskContext) (retErr error) {
 					"result", "skip",
 					"reason", "no_line_items_to_ship",
 					"dsco_raw", integration.JSONForLog(row.Payload),
-					"lingxing_raw", integration.JSONForLog(detail),
+					"wms_orders_raw", integration.JSONForLog(wmsOrders),
 				)...,
 			)
 			continue
 		}
+		trackingJoined := normalizeTrackingJoined(trackingList)
 
-		// 9) 组装 DSCO shipment 批量请求
+		// 8) 组装 DSCO shipment 批量请求
 		ship := dsco.ShipmentsForUpdate{
-			PoNumber: po,
-			Shipments: []dsco.ShipmentForUpdate{
-				{
-					TrackingNumber: tracking,
-					ShipDate:       shipDateRFC3339,
-					ShipMethod:     dscoShipMethod,
-					LineItems:      lineItems,
-				},
-			},
+			PoNumber:  po,
+			Shipments: shipments,
 		}
 		batch = append(batch, ship)
 		toUpdate = append(toUpdate, struct {
 			po       string
 			tracking string
-		}{po: po, tracking: tracking})
-
-		wmsRaw := ""
-		if len(wmsOrders) > 0 {
-			wmsRaw = integration.JSONForLog(wmsOrders[0])
-		}
+		}{po: po, tracking: trackingJoined})
 		logger.Info(taskCtx, "order prepared",
 			append(base,
 				"task", "ship_to_dsco",
 				"po_number", po,
-				"tracking", tracking,
+				"tracking", trackingJoined,
 				"ship_request", integration.JSONForLog(ship),
-				"lingxing_raw", integration.JSONForLog(detail),
-				"wms_order_raw", wmsRaw,
+				"wms_orders_raw", integration.JSONForLog(wmsOrders),
 			)...,
 		)
 	}

@@ -43,3 +43,21 @@ func TestGetWarehouseLogisticsMethods(t *testing.T) {
 	t.Logf("WarehouseLogisticsMethodsWithRawBody() total=%d list=%+v", total, list)
 	t.Logf("WarehouseLogisticsMethodsWithRawBody() raw_response=%+v", raw)
 }
+
+// 查询仓库列表
+func TestWmsOrderList(t *testing.T) {
+	cli := newClient(t)
+	list, total, raw, err := cli.Warehouse.WmsOrderListWithRawBody(
+		context.Background(),
+		lingxing.WmsOrderListRequest{
+			Page:               1,
+			PageSize:           20,
+			SIDArr:             []int{110658143132021760},
+			PlatformOrderNoArr: []string{"ZMDF8QZQPU8B9NY4RURU"},
+		})
+	if err != nil {
+		t.Fatalf("WmsOrderListWithRawBody() err=%v", err)
+	}
+	t.Logf("WmsOrderListWithRawBody() total=%d list=%+v", total, list)
+	t.Logf("WmsOrderListWithRawBody() raw_response=%+v", raw)
+}
