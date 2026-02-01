@@ -28,6 +28,7 @@
       <thead>
         <tr>
           <th>job</th>
+          <th>任务描述</th>
           <th>enable</th>
           <th>cron</th>
           <th>size</th>
@@ -35,13 +36,14 @@
         </tr>
       </thead>
       <tbody>
-        {{ range $job, $cfg := .Jobs }}
+        {{ range $row := .Jobs }}
         <tr>
-          <td><code>{{ $job }}</code></td>
-          <td>{{ $cfg.Enable }}</td>
-          <td><code>{{ $cfg.Cron }}</code></td>
-          <td>{{ $cfg.Size }}</td>
-          <td><button class="btn" onclick="adminRunOneJob('{{ $job }}')">Run</button></td>
+          <td><code>{{ $row.Job }}</code></td>
+          <td>{{ $row.Desc }}</td>
+          <td>{{ $row.Enable }}</td>
+          <td><code>{{ $row.Cron }}</code></td>
+          <td>{{ $row.Size }}</td>
+          <td><button class="btn" onclick="adminRunOneJob('{{ $row.Job }}')">Run</button></td>
         </tr>
         {{ end }}
       </tbody>
@@ -49,3 +51,4 @@
   </div>
   {{ template "layout_foot" . }}
 {{ end }}
+

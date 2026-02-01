@@ -3,12 +3,91 @@ package admin
 import (
 	"encoding/json"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 
 	"lingxingipass/infra/runtimecfg"
 )
+
+type dashboardJobRow struct {
+	Job    runtimecfg.JobName
+	Desc   string
+	Enable bool
+	Cron   string
+	Size   int
+}
+
+func jobDesc(job runtimecfg.JobName) string {
+	switch job {
+	case runtimecfg.JobPullDSCOOrders:
+		return "拉取 DSCO 订单入库"
+	case runtimecfg.JobPushToLingXing:
+		return "推送订单到领星（生成出库单）"
+	case runtimecfg.JobAckToDSCO:
+		return "回传确认（ACK）到 DSCO"
+	case runtimecfg.JobShipToDSCO:
+		return "回传发货（运单号）到 DSCO"
+	case runtimecfg.JobInvoiceToDSCO:
+		return "回传发票到 DSCO"
+	case runtimecfg.JobSyncStock:
+		return "同步库存到领星"
+	case runtimecfg.JobCleanupExports:
+		return "清理导出文件"
+	default:
+		return ""
+	}
+}
+
+func sortJobsForDashboard(jobs map[runtimecfg.JobName]runtimecfg.JobConfig) []dashboardJobRow {
+	if len(jobs) == 0 {
+		return nil
+	}
+
+	order := []runtimecfg.JobName{
+		runtimecfg.JobPullDSCOOrders,
+		runtimecfg.JobPushToLingXing,
+		runtimecfg.JobAckToDSCO,
+		runtimecfg.JobShipToDSCO,
+		runtimecfg.JobInvoiceToDSCO,
+		runtimecfg.JobSyncStock,
+		runtimecfg.JobCleanupExports,
+	}
+	orderIndex := make(map[runtimecfg.JobName]int, len(order))
+	for i, j := range order {
+		orderIndex[j] = i
+	}
+
+	names := make([]runtimecfg.JobName, 0, len(jobs))
+	for j := range jobs {
+		names = append(names, j)
+	}
+	sort.Slice(names, func(i, j int) bool {
+		ai, aok := orderIndex[names[i]]
+		bi, bok := orderIndex[names[j]]
+		if aok && bok {
+			return ai < bi
+		}
+		if aok != bok {
+			return aok
+		}
+		return string(names[i]) < string(names[j])
+	})
+
+	out := make([]dashboardJobRow, 0, len(names))
+	for _, name := range names {
+		cfg := jobs[name]
+		out = append(out, dashboardJobRow{
+			Job:    name,
+			Desc:   jobDesc(name),
+			Enable: cfg.Enable,
+			Cron:   cfg.Cron,
+			Size:   cfg.Size,
+		})
+	}
+	return out
+}
 
 func (s *Server) uiLogin(c *gin.Context) {
 	c.HTML(http.StatusOK, "login", gin.H{
@@ -40,7 +119,7 @@ func (s *Server) uiDashboard(c *gin.Context) {
 		"DisplayTimezone": s.env.Admin.DisplayTimezone,
 		"Domain":          runtimecfg.DomainDSCOLingXing,
 		"UpdatedAt":       rc.UpdatedAt,
-		"Jobs":            rc.Config.Jobs,
+		"Jobs":            sortJobsForDashboard(rc.Config.Jobs),
 	})
 }
 

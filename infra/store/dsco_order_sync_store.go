@@ -218,6 +218,22 @@ func (s *DSCOOrderSyncStore) UpdateStatus(ctx context.Context, poNumber string, 
 		}).Error
 }
 
+func (s *DSCOOrderSyncStore) UpdateStatusAndTrackingNo(ctx context.Context, poNumber string, status int16, trackingNo string) error {
+	po := strings.TrimSpace(poNumber)
+	if po == "" {
+		return errors.New("po_number 不能为空")
+	}
+	now := time.Now().UTC().Unix()
+	return s.db.WithContext(ctx).
+		Model(&DSCOOrderSyncRow{}).
+		Where("po_number = ?", po).
+		Updates(map[string]any{
+			"status":              status,
+			"shipped_tracking_no": trackingNo,
+			"updated_at":          now,
+		}).Error
+}
+
 func (s *DSCOOrderSyncStore) UpdateStatusAndFields(ctx context.Context, poNumber string, status int16, trackingNo, invoiceID string) error {
 	now := time.Now().UTC().Unix()
 	return s.db.WithContext(ctx).

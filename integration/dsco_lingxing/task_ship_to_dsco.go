@@ -45,12 +45,12 @@ func normalizeTrackingJoined(values []string) string {
 //     - dscoStatus == shipped：表示 DSCO 已发货，直接推进本地状态到 4（并尽量补齐 tracking）。
 //     - dscoStatus == shipment_pending：表示 DSCO 等待发货回传，本任务可以继续调用 DSCO shipment 接口。
 //     - 其他状态：本轮跳过（避免乱回传）。
-//  2. 幂等：若本地 shipped_tracking_no 已有值，则认为已回传过 shipment，直接跳过。
+//  2. 幂等：不以本地 shipped_tracking_no 判断是否回传；是否跳过以 DSCO 实际 dscoStatus 为准。
 //  3. 使用领星 WmsOrderList 获取发货数据（可能多条出库单/多运单号），按 trackingNo 聚合后回传 DSCO。
 //  4. shipDate：每个 trackingNo 优先取 DeliveredAt；为空则用 StockDeliveredAt 兜底（已确认）。
 //  5. SKU 映射：领星 SKU 通过 mapping.sku 的反向映射得到 DSCO partnerSku（缺省同名直传）。
 //  6. SID：WmsOrderList 查询需要 sid_arr；sid 从 mapping.shop 映射值解析得到（已确认）。
-//  7. 本地记录：回传成功后把 trackingNo（可能多条，用英文逗号拼接）写回 shipped_tracking_no，便于幂等与筛选。
+//  7. 本地记录：回传成功后把 trackingNo（可能多条，用英文逗号拼接）写回 shipped_tracking_no，便于展示与筛选。
 func (d *Domain) ShipToDSCO(ctx integration.TaskContext) (retErr error) {
 	taskCtx := ctx.Ctx
 	if taskCtx == nil {
@@ -117,7 +117,7 @@ func (d *Domain) ShipToDSCO(ctx integration.TaskContext) (retErr error) {
 	// 3) 先查 DSCO 状态（避免重复回传 shipment）：
 	poNumbers := make([]string, 0, len(items))
 	for _, it := range items {
-		if strings.TrimSpace(it.PONumber) == "" || it.ShippedTrackingNo != "" {
+		if strings.TrimSpace(it.PONumber) == "" {
 			continue
 		}
 		poNumbers = append(poNumbers, it.PONumber)
@@ -146,6 +146,7 @@ func (d *Domain) ShipToDSCO(ctx integration.TaskContext) (retErr error) {
 
 	for _, row := range items {
 		po := strings.TrimSpace(row.PONumber)
+		existingTracking := strings.TrimSpace(row.ShippedTrackingNo)
 		if po == "" {
 			skip++
 			logger.Info(taskCtx, "order done",
@@ -158,30 +159,21 @@ func (d *Domain) ShipToDSCO(ctx integration.TaskContext) (retErr error) {
 			)
 			continue
 		}
-		// 2) 幂等：已写入 shipped_tracking_no 的订单视为已回传过 shipment，直接跳过。
-		if row.ShippedTrackingNo != "" {
-			skip++
-			logger.Info(taskCtx, "order done",
-				append(base,
-					"task", "ship_to_dsco",
-					"po_number", po,
-					"result", "skip",
-					"reason", "already_has_shipped_tracking_no",
-					"tracking", row.ShippedTrackingNo,
-				)...,
-			)
-			continue
-		}
-
 		// 1) DSCO 状态判断：shipped -> 直接推进；shipment_pending -> 允许回传。
 		if o, ok := dscoByPO[po]; ok {
 			switch strings.TrimSpace(o.DscoStatus) {
 			case "shipped", "completed":
-				tracking := ""
+				trackingFromDSCO := ""
 				if len(o.Packages) > 0 {
-					tracking = normalizeTrackingJoined([]string{o.Packages[0].TrackingNumber})
+					trackingFromDSCO = normalizeTrackingJoined([]string{o.Packages[0].TrackingNumber})
 				}
-				if uerr := d.orderStore.UpdateStatusAndFields(taskCtx, po, 4, tracking, ""); uerr != nil {
+				var uerr error
+				if existingTracking == "" && trackingFromDSCO != "" {
+					uerr = d.orderStore.UpdateStatusAndTrackingNo(taskCtx, po, 4, trackingFromDSCO)
+				} else {
+					uerr = d.orderStore.UpdateStatus(taskCtx, po, 4)
+				}
+				if uerr != nil {
 					fail++
 					logger.Warn(taskCtx, "order done",
 						append(base,
@@ -191,7 +183,8 @@ func (d *Domain) ShipToDSCO(ctx integration.TaskContext) (retErr error) {
 							"reason", "update_local_status_failed_for_dsco_already_shipped",
 							"dsco_status", strings.TrimSpace(o.DscoStatus),
 							"dsco_raw", integration.JSONForLog(o),
-							"tracking", tracking,
+							"tracking_before", existingTracking,
+							"tracking_from_dsco", trackingFromDSCO,
 							"err", uerr,
 						)...,
 					)
@@ -207,7 +200,8 @@ func (d *Domain) ShipToDSCO(ctx integration.TaskContext) (retErr error) {
 						"reason", "dsco_already_shipped_or_completed",
 						"dsco_status", strings.TrimSpace(o.DscoStatus),
 						"dsco_raw", integration.JSONForLog(o),
-						"tracking", tracking,
+						"tracking_before", existingTracking,
+						"tracking_from_dsco", trackingFromDSCO,
 						"new_status", 4,
 					)...,
 				)

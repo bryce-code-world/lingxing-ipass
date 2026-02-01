@@ -18,7 +18,15 @@
 
       <input class="input sm" id="qTracking" placeholder="tracking contains" />
       <input class="input sm" id="qInvoice" placeholder="invoice_id contains" />
-      <input class="input sm" id="qStatus" placeholder="status (e.g. 1,2,3)" />
+      <select class="select sm" id="qStatus">
+        <option value="">status (all)</option>
+        <option value="1">1 待同步（推单到领星）</option>
+        <option value="2">2 待确认（回传 ACK）</option>
+        <option value="3">3 待发货回传（已确认）</option>
+        <option value="4">4 待发票回传（已发货）</option>
+        <option value="5">5 完成（已回传发票）</option>
+        <option value="6">6 已取消</option>
+      </select>
       <input class="input sm" id="qStartDT" type="datetime-local" />
       <input class="input sm" id="qEndDT" type="datetime-local" />
       <select class="select sm" id="qLimit" onchange="adminSetOrdersLimit()">
@@ -33,7 +41,7 @@
         <button class="btn" onclick="adminExportOrders()">Export CSV</button>
       </div>
     </div>
-    <div class="muted" style="margin-top: 8px;">时间按 <code id="tzLabel"></code> 显示；筛选输入按该时区解释；end 为开区间。</div>
+    <div class="muted" style="margin-top: 8px;">时间按 <code id="tzLabel"></code> 显示；筛选输入按该时区解释；end 为开区间。[start,end)。</div>
   </div>
 
   <div class="card" style="margin-top: 16px;">
@@ -72,4 +80,3 @@
   </div>
   {{ template "layout_foot" . }}
 {{ end }}
-

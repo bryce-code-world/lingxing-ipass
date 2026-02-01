@@ -436,7 +436,7 @@ async function copyToClipboard(text) {
 function statusLabel(status) {
   switch (Number(status)) {
     case 1: return "1 待同步（推单到领星）";
-    case 2: return "2 待确认（回传 ack）";
+    case 2: return "2 待确认（回传 ACK）";
     case 3: return "3 待发货回传（已确认）";
     case 4: return "4 待发票回传（已发货）";
     case 5: return "5 完成（已回传发票）";

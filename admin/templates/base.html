@@ -60,10 +60,10 @@
         <div class="row wrap filters" style="margin-top: 12px;">
           <select id="editStatusSelect" class="select sm">
             <option value="1">1 待同步（推单到领星）</option>
-            <option value="2">2 待确认（回传 ack）</option>
+            <option value="2">2 待确认（回传 ACK）</option>
             <option value="3">3 待发货回传（已确认）</option>
             <option value="4">4 待发票回传（已发货）</option>
-            <option value="5">5 完成（不再回传发票）</option>
+            <option value="5">5 完成（已回传发票）</option>
             <option value="6">6 已取消</option>
           </select>
           <button class="btn" type="button" onclick="closeModal('editStatusModal')">Cancel</button>
@@ -90,4 +90,3 @@
   </body>
 </html>
 {{ end }}
-
