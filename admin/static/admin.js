@@ -259,7 +259,71 @@ function renderTimestamps() {
 
 document.addEventListener("DOMContentLoaded", () => {
   initGlobalUI();
+  normalizeConfigTextarea();
 });
+
+const JOBS_DISPLAY_ORDER = [
+  "pull_dsco_orders",
+  "push_to_lingxing",
+  "ack_to_dsco",
+  "ship_to_dsco",
+  "invoice_to_dsco",
+  "sync_stock",
+  "cleanup_exports",
+];
+
+function normalizeJobConfigForDisplay(jc) {
+  if (!jc || typeof jc !== "object") return jc;
+  const out = {};
+  out.enable = Object.prototype.hasOwnProperty.call(jc, "enable") ? jc.enable : false;
+  if (Object.prototype.hasOwnProperty.call(jc, "cron")) out.cron = jc.cron;
+  if (Object.prototype.hasOwnProperty.call(jc, "size")) out.size = jc.size;
+  for (const k of Object.keys(jc)) {
+    if (!Object.prototype.hasOwnProperty.call(out, k)) out[k] = jc[k];
+  }
+  return out;
+}
+
+function normalizeJobsForDisplay(jobs) {
+  if (!jobs || typeof jobs !== "object") return jobs;
+  const out = {};
+  for (const name of JOBS_DISPLAY_ORDER) {
+    if (Object.prototype.hasOwnProperty.call(jobs, name)) {
+      out[name] = normalizeJobConfigForDisplay(jobs[name]);
+    }
+  }
+  const rest = Object.keys(jobs)
+    .filter((k) => !JOBS_DISPLAY_ORDER.includes(k))
+    .sort();
+  for (const k of rest) out[k] = normalizeJobConfigForDisplay(jobs[k]);
+  return out;
+}
+
+function normalizeRuntimeConfigForDisplay(cfg) {
+  if (!cfg || typeof cfg !== "object") return cfg;
+  const out = {};
+  if (Object.prototype.hasOwnProperty.call(cfg, "domain")) out.domain = cfg.domain;
+  if (Object.prototype.hasOwnProperty.call(cfg, "jobs")) out.jobs = normalizeJobsForDisplay(cfg.jobs);
+  if (Object.prototype.hasOwnProperty.call(cfg, "mapping")) out.mapping = cfg.mapping;
+  for (const k of Object.keys(cfg)) {
+    if (!Object.prototype.hasOwnProperty.call(out, k)) out[k] = cfg[k];
+  }
+  return out;
+}
+
+function normalizeConfigTextarea() {
+  const ta = qs("cfgJson");
+  if (!ta) return;
+  const raw = (ta.value || "").trim();
+  if (!raw) return;
+  try {
+    const cfg = JSON.parse(raw);
+    const normalized = normalizeRuntimeConfigForDisplay(cfg);
+    ta.value = JSON.stringify(normalized, null, 2);
+  } catch (_) {
+    // ignore invalid json in editor
+  }
+}
 
 async function adminRunAllJobs() {
   try {
@@ -303,7 +367,7 @@ async function adminLoadConfig() {
     const domain = (qs("cfgDomain")?.value || "").trim() || "dsco_lingxing";
     const data = await apiJSON("GET", "/admin/api/config/runtime?domain=" + encodeURIComponent(domain));
     qs("cfgDomain").value = data.domain;
-    qs("cfgJson").value = JSON.stringify(data.config, null, 2);
+    qs("cfgJson").value = JSON.stringify(normalizeRuntimeConfigForDisplay(data.config), null, 2);
     showToast("Load: OK");
   } catch (e) {
     showToast("Load: " + e.message);
