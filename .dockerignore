@@ -1,6 +1,13 @@
-golibv2
 .git
-logs
-exports
+golibv2
+logs/
+**/logs/
 *.log
 *.tmp
+.env
+.env.admin
+docker
+env.yaml
+deploy
+*.exe
+exports/

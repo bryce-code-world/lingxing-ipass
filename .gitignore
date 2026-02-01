@@ -8,3 +8,4 @@ docker
 env.yaml
 deploy
 *.exe
+exports/
