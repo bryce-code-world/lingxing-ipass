@@ -33,7 +33,7 @@ import (
 //   - 以 poNumber 为维度：同一 poNumber 即使对应领星拆单/多行，也只回传“1 张汇总发票”给 DSCO。
 //   - 前置条件：poNumber 下所有 SKU 均已发货（以 WmsOrderList 聚合数量 >= DSCO 原始订单数量 为准）。
 //   - invoiceId：固定 invoiceId = poNumber。
-//   - trackingNumber：若存在多运单号，则用逗号拼接（便于排查；如 DSCO 侧不接受可再调整）。
+//   - tracking：DSCO 发票接口不接受顶层 trackingNumber 字段；本任务仅在日志中记录运单号（若多个用逗号拼接），tracking 由 `ship_to_dsco` 回传。
 func (d *Domain) InvoiceToDSCO(ctx integration.TaskContext) (retErr error) {
 	taskCtx := ctx.Ctx
 	if taskCtx == nil {
@@ -252,7 +252,7 @@ func (d *Domain) InvoiceToDSCO(ctx integration.TaskContext) (retErr error) {
 
 		// 6) 计算“实际已发货数量”（WMS 聚合）与运单号集合：
 		// - shippedQty：用于判断“是否全部已发货”
-		// - tracking：回传发票带上运单号（若多个用逗号拼接）
+		// - tracking：仅用于日志排查；DSCO 发票接口不接受顶层 trackingNumber 字段
 		shippedQtyByPartner := map[string]int{}
 		trackingList := make([]string, 0, len(wmsOrders))
 		var latestInvoiceDate string
@@ -393,7 +393,6 @@ func (d *Domain) InvoiceToDSCO(ctx integration.TaskContext) (retErr error) {
 			InvoiceID:           invoiceID,
 			PoNumber:            po,
 			ConsumerOrderNumber: derefString(dscoOrder.ConsumerOrderNumber),
-			TrackingNumber:      trackingJoined,
 			InvoiceDate:         latestInvoiceDate,
 			CurrencyCode:        currency,
 			TotalAmount:         totalAmount,
@@ -409,6 +408,7 @@ func (d *Domain) InvoiceToDSCO(ctx integration.TaskContext) (retErr error) {
 				"task", "invoice_to_dsco",
 				"po_number", po,
 				"invoice_id", invoiceID,
+				"tracking", trackingJoined,
 				"invoice_request", integration.JSONForLog(inv),
 				"wms_orders_raw", integration.JSONForLog(wmsOrders),
 			)...,
