@@ -35,6 +35,12 @@ type JobConfig struct {
 	Enable bool   `json:"enable"`
 	Cron   string `json:"cron"`
 	Size   int    `json:"size"`
+
+	// MultiBan 为 true 时，禁止处理“多行/多数量”的订单（多 SKU / 单 SKU 多数量）。
+	// 说明：
+	// - MultiBan=false：不禁止（默认），允许执行该类订单。
+	// - MultiBan=true：禁止，任务会跳过该类订单（不推进状态）。
+	MultiBan bool `json:"multi_ban"`
 }
 
 // Mapping is DSCO -> LingXing (key=DSCO, value=LingXing).

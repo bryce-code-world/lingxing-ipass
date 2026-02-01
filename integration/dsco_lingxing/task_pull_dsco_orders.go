@@ -3,6 +3,7 @@ package dsco_lingxing
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
@@ -193,14 +194,14 @@ func (d *Domain) PullDSCOOrders(ctx integration.TaskContext) (retErr error) {
 				}
 			}
 
-			// 3.2) mskus：提取 partnerSku/sku（用于列表筛选、CSV 导出）
+			// 3.2) mskus：按 DSCO LineItems 逐行写入，格式为 "sku(quantity)"（保留重复行）
 			mskus := make([]string, 0, len(order.LineItems))
 			for _, li := range order.LineItems {
-				if li.PartnerSKU != nil && *li.PartnerSKU != "" {
-					mskus = append(mskus, *li.PartnerSKU)
-				} else if li.SKU != nil && *li.SKU != "" {
-					mskus = append(mskus, *li.SKU)
+				sku := strings.TrimSpace(derefString(li.SKU))
+				if sku == "" {
+					continue
 				}
+				mskus = append(mskus, fmt.Sprintf("%s(%d)", sku, li.Quantity))
 			}
 
 			// 3.3) 入库状态：优先根据 DSCO dsco_status 推导；未知状态则默认 1

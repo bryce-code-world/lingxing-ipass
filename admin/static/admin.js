@@ -272,12 +272,17 @@ const JOBS_DISPLAY_ORDER = [
   "cleanup_exports",
 ];
 
-function normalizeJobConfigForDisplay(jc) {
+const JOBS_WITH_MULTI_BAN = new Set(["ack_to_dsco", "ship_to_dsco", "invoice_to_dsco"]);
+
+function normalizeJobConfigForDisplay(name, jc) {
   if (!jc || typeof jc !== "object") return jc;
   const out = {};
   out.enable = Object.prototype.hasOwnProperty.call(jc, "enable") ? jc.enable : false;
   if (Object.prototype.hasOwnProperty.call(jc, "cron")) out.cron = jc.cron;
   if (Object.prototype.hasOwnProperty.call(jc, "size")) out.size = jc.size;
+  if (JOBS_WITH_MULTI_BAN.has(name)) {
+    out.multi_ban = Object.prototype.hasOwnProperty.call(jc, "multi_ban") ? jc.multi_ban : false;
+  }
   for (const k of Object.keys(jc)) {
     if (!Object.prototype.hasOwnProperty.call(out, k)) out[k] = jc[k];
   }
@@ -289,13 +294,13 @@ function normalizeJobsForDisplay(jobs) {
   const out = {};
   for (const name of JOBS_DISPLAY_ORDER) {
     if (Object.prototype.hasOwnProperty.call(jobs, name)) {
-      out[name] = normalizeJobConfigForDisplay(jobs[name]);
+      out[name] = normalizeJobConfigForDisplay(name, jobs[name]);
     }
   }
   const rest = Object.keys(jobs)
     .filter((k) => !JOBS_DISPLAY_ORDER.includes(k))
     .sort();
-  for (const k of rest) out[k] = normalizeJobConfigForDisplay(jobs[k]);
+  for (const k of rest) out[k] = normalizeJobConfigForDisplay(k, jobs[k]);
   return out;
 }
 

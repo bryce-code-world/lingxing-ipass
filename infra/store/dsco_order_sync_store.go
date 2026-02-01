@@ -38,7 +38,7 @@ type DSCOOrderSyncListFilter struct {
 	DSCOStatus     string  `json:"dscoStatus"`
 	PONumberLike   string  `json:"poNumberLike"`
 	DSCOREtailerID string  `json:"dscoRetailerId"`
-	MSKU           string  `json:"msku"` // filter: sku = ANY(mskus)
+	MSKU           string  `json:"msku"` // filter: sku matches any element in mskus（兼容 sku / sku(quantity)）
 
 	WarehouseID string `json:"warehouseId"`
 	Shipment    string `json:"shipment"`
@@ -123,7 +123,15 @@ func (s *DSCOOrderSyncStore) List(ctx context.Context, f DSCOOrderSyncListFilter
 		q = q.Where("dsco_retailer_id = ?", strings.TrimSpace(f.DSCOREtailerID))
 	}
 	if strings.TrimSpace(f.MSKU) != "" {
-		q = q.Where("? = ANY(mskus)", strings.TrimSpace(f.MSKU))
+		sku := strings.TrimSpace(f.MSKU)
+		// 兼容：
+		// - 旧数据：mskus 元素为 "sku"（精确匹配）
+		// - 新数据：mskus 元素为 "sku(quantity)"（前缀匹配）
+		q = q.Where(
+			"EXISTS (SELECT 1 FROM unnest(mskus) AS m WHERE m = ? OR m ILIKE ?)",
+			sku,
+			sku+"(%",
+		)
 	}
 	if strings.TrimSpace(f.WarehouseID) != "" {
 		q = q.Where("warehouse_id = ?", strings.TrimSpace(f.WarehouseID))

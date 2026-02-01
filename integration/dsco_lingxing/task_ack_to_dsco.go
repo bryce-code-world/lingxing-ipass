@@ -99,6 +99,11 @@ func (d *Domain) AckToDSCO(ctx integration.TaskContext) (retErr error) {
 	}
 
 	// 3) 先查 DSCO 订单状态（避免重复 ACK）：
+	multiBan := false
+	if jc, ok := ctx.Config.Jobs[ctx.Job]; ok {
+		multiBan = jc.MultiBan
+	}
+
 	poNumbers := make([]string, 0, len(items))
 	for _, it := range items {
 		poNumbers = append(poNumbers, it.PONumber)
@@ -158,6 +163,25 @@ func (d *Domain) AckToDSCO(ctx integration.TaskContext) (retErr error) {
 						"dsco_status", st,
 						"dsco_raw", integration.JSONForLog(o),
 						"new_status", 3,
+					)...,
+				)
+				continue
+			}
+		}
+		if multiBan {
+			isMulti, mi := detectMultiOrderByMSKUs([]string(row.MSKUs))
+			if isMulti {
+				skip++
+				logger.Info(taskCtx, "order done",
+					append(base,
+						"task", "ack_to_dsco",
+						"po_number", po,
+						"result", "skip",
+						"reason", "multi_banned",
+						"multi_ban", true,
+						"mskus", []string(row.MSKUs),
+						"multi_info", integration.JSONForLog(mi),
+						"dsco_payload", integration.JSONForLog(payloadByPO[po]),
 					)...,
 				)
 				continue

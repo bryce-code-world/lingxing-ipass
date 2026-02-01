@@ -102,6 +102,11 @@ func (d *Domain) InvoiceToDSCO(ctx integration.TaskContext) (retErr error) {
 		return retErr
 	}
 
+	multiBan := false
+	if jc, ok := ctx.Config.Jobs[ctx.Job]; ok {
+		multiBan = jc.MultiBan
+	}
+
 	var invs []dsco.Invoice
 	var toUpdate []struct {
 		po        string
@@ -136,6 +141,26 @@ func (d *Domain) InvoiceToDSCO(ctx integration.TaskContext) (retErr error) {
 				)...,
 			)
 			continue
+		}
+
+		if multiBan {
+			isMulti, mi := detectMultiOrderByMSKUs([]string(row.MSKUs))
+			if isMulti {
+				skip++
+				logger.Info(taskCtx, "order done",
+					append(base,
+						"task", "invoice_to_dsco",
+						"po_number", po,
+						"result", "skip",
+						"reason", "multi_banned",
+						"multi_ban", true,
+						"mskus", []string(row.MSKUs),
+						"multi_info", integration.JSONForLog(mi),
+						"dsco_raw", integration.JSONForLog(row.Payload),
+					)...,
+				)
+				continue
+			}
 		}
 
 		// 3) 解析 DSCO 原始订单（用于 dscoItemId/币种/参考字段等）

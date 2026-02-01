@@ -138,6 +138,11 @@ func (d *Domain) ShipToDSCO(ctx integration.TaskContext) (retErr error) {
 		return retErr
 	}
 
+	multiBan := false
+	if jc, ok := ctx.Config.Jobs[ctx.Job]; ok {
+		multiBan = jc.MultiBan
+	}
+
 	var batch []dsco.ShipmentsForUpdate
 	var toUpdate []struct {
 		po       string
@@ -232,6 +237,26 @@ func (d *Domain) ShipToDSCO(ctx integration.TaskContext) (retErr error) {
 					"po_number", po,
 				)...,
 			)
+		}
+
+		if multiBan {
+			isMulti, mi := detectMultiOrderByMSKUs([]string(row.MSKUs))
+			if isMulti {
+				skip++
+				logger.Info(taskCtx, "order done",
+					append(base,
+						"task", "ship_to_dsco",
+						"po_number", po,
+						"result", "skip",
+						"reason", "multi_banned",
+						"multi_ban", true,
+						"mskus", []string(row.MSKUs),
+						"multi_info", integration.JSONForLog(mi),
+						"dsco_raw", integration.JSONForLog(row.Payload),
+					)...,
+				)
+				continue
+			}
 		}
 
 		// 3) 解析 DSCO 原始订单（用于 dscoItemId/shipMethod 等字段拼装）

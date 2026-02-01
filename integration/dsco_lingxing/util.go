@@ -277,3 +277,65 @@ func dscoStatusToSyncStatus(dscoStatus string) (int16, bool) {
 		return 0, false
 	}
 }
+
+type multiOrderInfo struct {
+	LineItemCount int  `json:"line_item_count"`
+	HasQtyGT1     bool `json:"has_qty_gt_1"`
+	MaxQuantity   int  `json:"max_quantity"`
+}
+
+// detectMultiOrderByMSKUs 使用本地入库的 mskus 判断是否为“多行/多数量”订单。
+//
+// 规则（按你的定义）：
+// - 多行：同一 poNumber 下 LineItems 存在多行
+// - 多数量：单行但 quantity > 1
+//
+// 兼容：
+// - 新格式：sku(quantity)
+// - 旧格式：sku（无括号时视为 quantity=1）
+func detectMultiOrderByMSKUs(mskus []string) (bool, multiOrderInfo) {
+	info := multiOrderInfo{}
+	for _, raw := range mskus {
+		s := strings.TrimSpace(raw)
+		if s == "" {
+			continue
+		}
+		info.LineItemCount++
+		qty := parseQtyFromMSKUToken(s)
+		if qty > info.MaxQuantity {
+			info.MaxQuantity = qty
+		}
+		if qty > 1 {
+			info.HasQtyGT1 = true
+		}
+	}
+	if info.LineItemCount > 1 || info.HasQtyGT1 {
+		return true, info
+	}
+	return false, info
+}
+
+func parseQtyFromMSKUToken(token string) int {
+	// 期望格式：sku(quantity)
+	// - quantity 解析失败时兜底为 1（兼容旧数据 sku）
+	s := strings.TrimSpace(token)
+	if s == "" {
+		return 1
+	}
+	if !strings.HasSuffix(s, ")") {
+		return 1
+	}
+	i := strings.LastIndex(s, "(")
+	if i <= 0 || i >= len(s)-1 {
+		return 1
+	}
+	qStr := strings.TrimSpace(s[i+1 : len(s)-1])
+	if qStr == "" {
+		return 1
+	}
+	q, err := strconv.Atoi(qStr)
+	if err != nil || q <= 0 {
+		return 1
+	}
+	return q
+}
