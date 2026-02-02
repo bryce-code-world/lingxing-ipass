@@ -9,3 +9,4 @@ env.yaml
 deploy
 *.exe
 exports/
+restart.ps1
