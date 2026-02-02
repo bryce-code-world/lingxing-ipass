@@ -51,7 +51,7 @@ func TestOrderService_ListOrdersV2(t *testing.T) {
 		// DateType:         lingxing.MultiPlatformOrderDateTypeUpdateTime,
 		// StartTime:        1769304406,
 		// EndTime:          1769650006,
-		PlatformOrderNos: []string{"6ECM5T57UBS9CV6WDWNX"},
+		PlatformOrderNos: []string{"YWK5JV7Y7Y8UZ9XH3YAT"},
 	})
 	if err != nil {
 		t.Fatalf("ListOrdersV2() err=%v", err)

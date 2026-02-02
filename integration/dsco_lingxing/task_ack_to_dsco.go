@@ -201,7 +201,7 @@ func (d *Domain) AckToDSCO(ctx integration.TaskContext) (retErr error) {
 	for _, chunk := range chunkStrings(uniqueNonEmptyStrings(needAck), maxBatch) {
 		out, err := lx.Order.ListOrdersV2(taskCtx, lingxing.OrderListV2Request{
 			Offset:           0,
-			Length:           len(chunk),
+			Length:           maxBatch,
 			PlatformOrderNos: chunk,
 			IncludeDelete:    &includeDelete,
 		})
