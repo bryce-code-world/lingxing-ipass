@@ -1,204 +1,143 @@
-## 项目简介
+# lingxing-ipass
 
-本项目是 DSCO 与领星之间的数据自动化通道（一期），以领星作为业务数据中心：
-- 从 DSCO 增量拉取订单并同步到领星；
-- 跟踪领星订单状态，向 DSCO 回传 ACK、发货、发票；
-- 从领星拉取可用库存并同步到 DSCO。
+DSCO ↔ 领星（LingXing）的同步服务（一期）。单进程运行：一个 `main.go` 同时启动 HTTP（Admin UI + Admin API + healthz/readyz）与定时调度（cron，启用 seconds，固定 UTC）。
 
-一期原则：
-- 最小存储：不做“全量业务翻译”，只落最小状态/水位/人工队列；同时保留 DSCO 原始订单快照用于回溯审计；
-- 幂等：以 `dscoOrderId` 为订单幂等主键；
-- 失败可追踪：全链路 `trace_id` + JSON Lines 落盘日志；
-- 可运维：提供最小 HTTP 管理端用于改水位、查人工任务、手动触发 job。
-- 可视化：提供 Admin 管理后台（页面 + API），用于长期运维排障。
+本 README 只覆盖“从 0 到 1 跑起来 / 运维使用”的信息；详细业务口径与字段映射请查看 `doc/DSCO同步领星设计文档/`。
 
-相关设计文档：
-- `doc/一期系统设计文档/1. 一期业务需求（DSCO-领星自动化）.md`
-- `doc/一期系统设计文档/2. 一期系统设计（DSCO-领星自动化）.md`
-- `doc/一期系统设计文档/3. 一期开发设计（DSCO-领星自动化）.md`
+## 你会得到什么
 
-## 依赖与准备
+- Admin UI + Admin API：统一挂载在 `/admin/*`
+- 健康检查：`GET /healthz`（存活）与 `GET /readyz`（runtime config + DB ping）
+- 运行时配置：存储在 PostgreSQL 的 `runtime_config` 表（Admin 保存即生效；任务执行读取配置快照）
 
-- Go（建议 1.20+）
-- MySQL 8+（或兼容的 MySQL）
+## 快速开始（本地运行）
 
-## 数据库初始化
+### 0) 前置条件
 
-执行建表脚本：
-- `migrations/0001_init.sql`
+- Go：本项目 `go.mod` 为 `go 1.23`（建议安装 Go 1.23+；或设置 `GOTOOLCHAIN=auto`）
+- PostgreSQL：建议 14+（本项目使用 GORM + Postgres driver）
+- `golibv2`：本仓库通过 `go.mod replace` 指向 `./golibv2/v2`，而 `./golibv2` 在当前环境是 **Junction**（不在 git 内）。你需要自行准备 `golibv2` 源码并在本仓库下创建同名链接目录。
 
-表说明（一期）：
-- `sync_order_state`：订单闭环状态（推单/ACK/发货/发票）与幂等控制
-- `job_watermark`：各任务水位（增量起点）
-- `manual_task`：人工处理队列（多包裹/缺映射/坏数据等）
-- `dsco_order_raw`：DSCO 原始订单快照（仅保留“最新一份”，用于回溯审计/排查）
+### 1) 拉取仓库
 
-## 配置
-
-程序启动时会自动加载项目根目录 `.env`（不覆盖已存在的环境变量）。参考示例：
-- `.env.example`
-
-关键配置项（节选）：
-
-系统配置（基础设施/可靠性/外部系统）：
-- `IPASS_DB_DSN`：MySQL DSN
-- `IPASS_LOG_DIR`：日志目录（默认 `logs/`）
-- `IPASS_HTTP_ENABLE` / `IPASS_HTTP_ADDR`：HTTP 管理端开关与监听地址
-- `IPASS_ADMIN_PASSWORD`：Admin 后台访问密码（一期最小：单密码；用于 UI 与管理 API）
-- `IPASS_DSCO_BASE_URL` / `IPASS_DSCO_TOKEN`：DSCO API 配置（一期使用请求头 bearer token）
-- `IPASS_LINGXING_BASE_URL` / `IPASS_LINGXING_APP_ID` / `IPASS_LINGXING_ACCESS_TOKEN`：领星 OpenAPI 配置
-- `IPASS_LINGXING_PLATFORM_CODE` / `IPASS_LINGXING_STORE_ID`：推单固定参数（一期写死在配置）
-- `IPASS_LINGXING_SID`：WMS 出库单查询参数（`sid_arr`）
-- `IPASS_MAX_RETRY_PER_ORDER`：同一 dscoOrderId 单环节最大重试次数（默认 5，达到上限转人工）
-
-业务配置（口径/映射/可随业务调整）：
-- `IPASS_STOCK_WID_TO_DSCO_WAREHOUSE_CODE_JSON`：库存同步必填映射（领星 WID -> DSCO warehouseCode）
-- `IPASS_STOCK_SKU_TO_DSCO_SKU_JSON`：库存同步可选映射（领星 SKU -> DSCO SKU）
-- `IPASS_SHIP_DATE_SOURCE`：发货回传 shipDate 取值来源（`delivered_at`/`stock_delivered_at`/`none`）
-
-## 业务映射如何注入（保姆级）
-
-一期的“业务映射”不做复杂后台配置，统一通过 `.env` 注入（环境变量），优点是简单、可审计、可复现。
-
-### 1) 库存：领星仓库 WID -> DSCO warehouseCode（必填）
-
-配置项：`IPASS_STOCK_WID_TO_DSCO_WAREHOUSE_CODE_JSON`
-
-说明：
-- Key：领星仓库 WID（注意：这里按字符串处理，例如 `"26"`）
-- Value：DSCO 仓库编码 `warehouseCode`（例如 `"WH1"`）
-- 该映射仅用于 `sync_stock` 任务
-
-示例（`.env`）：
-
-```dotenv
-IPASS_STOCK_WID_TO_DSCO_WAREHOUSE_CODE_JSON="{\"26\":\"WH1\",\"27\":\"WH2\"}"
+```bash
+git clone <your-repo-url> lingxing-ipass
+cd lingxing-ipass
 ```
 
-### 2) 库存：领星 SKU -> DSCO SKU（可选）
+### 2) 准备 `golibv2`（必须）
 
-配置项：`IPASS_STOCK_SKU_TO_DSCO_SKU_JSON`
+确保你的本机已有 `golibv2` 代码目录（例如 `D:\src\golibv2`），然后在本仓库根目录创建链接：
 
-说明：
-- Key：领星侧 SKU（字符串）
-- Value：DSCO 侧 SKU（字符串）
-- 不配置时默认“同名直传”（领星 SKU 原样作为 DSCO SKU）
+- Windows（PowerShell，管理员权限通常不需要）：
 
-示例（`.env`）：
-
-```dotenv
-IPASS_STOCK_SKU_TO_DSCO_SKU_JSON="{\"LXSKU-1\":\"DSCOSKU-1\"}"
+```powershell
+New-Item -ItemType Junction -Path .\golibv2 -Target D:\src\golibv2
 ```
 
-### 3) 发货回传 shipDate 口径（可选但建议明确）
+- Windows（cmd）：
 
-配置项：`IPASS_SHIP_DATE_SOURCE`
-
-可选值：
-- `delivered_at`：使用领星 WMS 的 `delivered_at` 作为 DSCO `shipDate`（默认）
-- `stock_delivered_at`：使用领星 WMS 的 `stock_delivered_at`
-- `none`：不回传 `shipDate`
-
-示例（`.env`）：
-
-```dotenv
-IPASS_SHIP_DATE_SOURCE="delivered_at"
+```bat
+mklink /J golibv2 D:\src\golibv2
 ```
 
-### 4) 如何验证映射生效
+- Linux/macOS（符号链接）：
+```bash
+ln -s /path/to/golibv2 ./golibv2
+```
 
-- 仓库映射：运行 `POST /admin/run?job=sync_stock` 后，DSCO 库存会落到对应 `warehouseCode`（若缺映射会写入 `manual_task(task_type=missing_mapping)`）。
-- SKU 映射：同上；若 DSCO 库存更新的 SKU 与预期一致则表示生效（不配置则应与领星 SKU 一致）。
-- shipDate 口径：运行 `POST /admin/run?job=ship_to_dsco` 后，在 DSCO 侧查看发货记录的 `shipDate` 是否符合预期。
+完成后应满足：`./golibv2/v2` 存在，否则 `go mod` 会报 `replacement directory ./golibv2/v2 does not exist`。
 
-任务开关与间隔（示例）：
-- `IPASS_JOB_PULL_DSCO_ORDERS_ENABLE` / `IPASS_JOB_PULL_DSCO_ORDERS_INTERVAL_SEC`
-- `IPASS_JOB_PUSH_ORDERS_TO_LINGXING_ENABLE` / `IPASS_JOB_PUSH_ORDERS_TO_LINGXING_INTERVAL_SEC` / `IPASS_JOB_PUSH_ORDERS_TO_LINGXING_BATCH_SIZE`
-- `IPASS_JOB_ACK_TO_DSCO_ENABLE` / `IPASS_JOB_ACK_TO_DSCO_INTERVAL_SEC`
-- `IPASS_JOB_SHIP_TO_DSCO_ENABLE` / `IPASS_JOB_SHIP_TO_DSCO_INTERVAL_SEC`
-- `IPASS_JOB_INVOICE_TO_DSCO_ENABLE` / `IPASS_JOB_INVOICE_TO_DSCO_INTERVAL_SEC` / `IPASS_JOB_INVOICE_TO_DSCO_BATCH_SIZE`
-- `IPASS_JOB_SYNC_STOCK_ENABLE` / `IPASS_JOB_SYNC_STOCK_INTERVAL_SEC` / `IPASS_JOB_SYNC_STOCK_BATCH_SIZE`
+### 3) 初始化数据库（PostgreSQL）
 
-## 启动
+本项目不引入迁移工具，只维护最新建表脚本：`migrations/init.sql`。
 
-在项目根目录执行：
-- `go run ./cmd/ipass/main.go`
+1) 创建数据库（示例名：`lingxing_ipass`）：
 
-## 业务进程 Ops HTTP（一期最小运维面）
+```sql
+CREATE DATABASE lingxing_ipass;
+```
 
-启用条件：`IPASS_HTTP_ENABLE=true`，默认监听 `IPASS_HTTP_ADDR=":8080"`。
-鉴权：必须配置 `IPASS_OPS_PASSWORD`，调用时携带请求头 `X-Ops-Password: <IPASS_OPS_PASSWORD>`。
+2) 执行建表脚本：
 
-接口清单：
-- `GET /healthz`：健康检查
-- `POST /admin/run?job=...`：手动触发一次指定 job（同步执行）
-- `GET /admin/order_state/get?dsco_order_id=...`：按 dscoOrderId 查询订单闭环状态（含 last_error、retry_count 等）
-- `GET /admin/order_states?push_status=&ack_status=&ship_status=&invoice_status=&limit=&offset=`：按状态筛选列表（最小分页）
-- `GET /admin/watermark/get?job=...`：获取某个 job 的水位（返回 JSON）
-- `POST /admin/watermark/set?job=...`：设置某个 job 的水位（请求体为 JSON，直接写入 `job_watermark.watermark`）
-- `GET /admin/manual_tasks?status=0&limit=50&offset=0`：查看人工任务队列
+```bash
+psql -h 127.0.0.1 -U root -d lingxing_ipass -f migrations/init.sql
+```
 
-认证：
-- 业务进程的 `/admin/*` 属于 ops 接口：请求头必须携带 `X-Ops-Password: <IPASS_OPS_PASSWORD>`
+### 4) 配置 `env.yaml`
 
-## Admin 管理后台（可视化，独立进程）
+程序启动时读取仓库根目录 `env.yaml`，并支持用环境变量覆盖部分字段（见 `infra/config/envyaml.go` 的 `IPASS_*` 覆盖项）。
 
-定位：用于运维与排障，不承载业务主流程；**与业务进程完全分离**：
-- Admin 自己读取数据库（独立 DB 连接与独立 store）
-- Admin 触发任务时，通过 HTTP 调用业务进程 ops（不会直接 import 业务 pipeline）
+推荐做法：从模板开始复制一份并填写敏感信息：
 
-入口：
-- 登录页：`GET /admin/ui/login`
-- 总览：`GET /admin/ui/`
-- 订单：`GET /admin/ui/orders`、`GET /admin/ui/order?dsco_order_id=...`
-- 人工任务：`GET /admin/ui/manual_tasks`
-- 水位：`GET /admin/ui/watermarks`
-- 手动触发：`GET /admin/ui/jobs`
+```bash
+cp env.yaml.example env.yaml
+```
 
-认证口径：
-- “每次打开浏览器/新会话登录一次”：登录成功后写入 session cookie（浏览器关闭即失效）
-- 命令行/脚本访问 Admin 的 JSON API：请求头 `X-Admin-Password: <ADMIN_PASSWORD>`
+最少需要关注：
+- `db.dsn` 或 `db.postgres.*`（连接到上一步的 Postgres）
+- `db.postgres.dbName`（需与你创建的数据库一致；仓库内常用示例为 `lingxing_ipass`）
+- `admin.password`（Admin 登录密码）
+- `auth.dsco.token`、`auth.lingxing.app_id/app_secret`
+- `integration.lingxing.platform_code`（必填）
 
-启动方式（两进程）：
-- 业务进程：`go run ./cmd/ipass/main.go`（提供闭环调度 + ops HTTP）
-- admin 进程：`go run ./cmd/admin/main.go`（提供可视化后台）
+### 5) 启动
 
-admin 配置：
-- 参考：`.env.admin.example`
-- 默认加载：根目录 `.env.admin`（不覆盖已存在的 env）
-  - `ADMIN_DB_DSN`：admin 连接数据库 DSN
-  - `ADMIN_HTTP_ADDR`：admin 监听地址（默认 `:8081`）
-  - `ADMIN_PASSWORD`：admin 登录/鉴权密码
-  - `ADMIN_OPS_BASE_URL`：业务 ops 地址（例如 `http://127.0.0.1:8080`）
-  - `ADMIN_OPS_PASSWORD`：调用业务 ops 的密码（请求头 `X-Ops-Password`）
+```bash
+go test ./...
+go run -buildvcs=false ./main.go
+```
 
-代码位置：
-- `admin/adminweb/`：Admin UI + Admin API（Gin + `html/template`）
-- `admin/store/`：Admin 独立 DB 读写（不复用业务侧 `internal/store`）
+启动后访问：
+- `base.listen_addr=":8080"` 时：Admin UI `http://127.0.0.1:8080/admin`
+- 健康检查：`/healthz`、`/readyz`（同端口）
 
-一期 job 名称：
-- `pull_dsco_orders`
-- `push_orders_to_lingxing`
-- `ack_to_dsco`
-- `ship_to_dsco`
-- `invoice_to_dsco`
-- `sync_stock`
+## 运行（Docker：本仓库自带的开发编排）
 
-说明：
-- 水位默认从 `0` 开始；当领星订单列表水位为 `0` 时，会按“最近 30 天”裁剪查询窗口（领星接口时间跨度限制）。
-- HTTP 请求可通过请求头 `X-Trace-Id` 传入 trace id；不传则自动生成。
-- 当某个环节对同一 `dscoOrderId` 的处理失败次数达到 `IPASS_MAX_RETRY_PER_ORDER`，系统会创建 `manual_task(task_type=max_retry_exceeded)` 并将该环节状态置为人工（3）。
+本仓库提供了用于 Windows 开发机的示例编排：
+- 服务编排：`docker/docker-compose.lingxing-ipass.service.yml`
+- 一键重启脚本：`restart.ps1`
+- 容器内配置示例：`docker/lingxingipass/env.yaml`
 
-## 日志
+说明：这些 compose 文件包含与本机目录、外部网络（例如 `infra_default`）相关的配置；在新环境使用时需要按实际情况调整 `volumes` 与 `networks`。
 
-默认写入 `logs/` 目录，按 JSON Lines 落盘，文件包括：
-- `logs/info.log`
-- `logs/debug.log`
-- `logs/warn.log`
-- `logs/error.log`
+示例（在本仓库根目录）：
 
-核心字段：
-- `trace_id`：贯穿一次 job 执行链路
-- `job`：任务名
-- `dsco_order_id`：涉及的订单（如有）
-- `err`：错误信息（如有）
+```powershell
+# 启动（或重启）服务
+docker compose -p lingxing-ipass -f docker\\docker-compose.lingxing-ipass.service.yml up -d
+
+# 查看日志
+docker logs -f lingxingipass
+```
+
+## 运维说明（面向线上/长期运行）
+
+### Admin 与安全
+
+- Admin UI + Admin API 统一在 `/admin/*`，目前是“单密码 + session cookie”的最小实现，建议只在内网使用或置于反向代理/鉴权之后。
+- `admin.password` 来自 `env.yaml`（或环境变量覆盖）。
+
+### 定时任务与手动触发
+
+- 调度器使用 `github.com/robfig/cron/v3`，启用 seconds，时区固定 UTC。
+- 定时是否触发由 runtime config 中的 `jobs.<job>.enable` 控制；但 Admin 的手动触发不受该开关限制（用于排障/补偿）。
+
+### 配置变更
+
+- 运行时配置落在 `runtime_config` 表：Admin 保存即生效。
+- 任务执行时读取一次“配置快照”，本次执行全程使用同一快照；下次执行再读取新快照。
+
+### 日志与导出文件
+
+- 日志：统一使用 `example.com/lingxing/golib/v2/tool/logger`，输出到 `log.dir`（并可同时 stdout）。
+- 导出：Admin 的 CSV 导出落在 `admin.export.dir`，并提供清理任务（见 runtime config jobs）。
+
+### 健康检查
+
+- `GET /healthz`：仅表示 HTTP 进程存活。
+- `GET /readyz`：检查 runtime config 已加载，且尽量对 DB 做一次 ping（用于容器编排 readiness）。
+
+## 进一步阅读
+
+- 业务/字段口径/任务定义与数据库设计：`doc/DSCO同步领星设计文档/`
