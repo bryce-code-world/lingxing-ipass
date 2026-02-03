@@ -354,6 +354,10 @@ func (d *Domain) ShipToDSCO(ctx integration.TaskContext) (retErr error) {
 		shipAggByTracking := map[string]*shipAgg{}
 
 		for _, w := range wmsOrders {
+			// 只在领星 WmsOrder.status=3（已发货）时才回传物流信息；否则发货时间往往为空值，且不应回传。
+			if w.Status != 3 {
+				continue
+			}
 			tracking := strings.TrimSpace(w.TrackingNo)
 			if tracking == "" {
 				continue
