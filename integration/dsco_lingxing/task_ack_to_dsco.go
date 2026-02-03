@@ -103,6 +103,10 @@ func (d *Domain) AckToDSCO(ctx integration.TaskContext) (retErr error) {
 	if jc, ok := ctx.Config.Jobs[ctx.Job]; ok {
 		multiBan = jc.MultiBan
 	}
+	// 手动单号测试（OnlyPONumber 非空）允许通过：此时是人工验证单个订单，不做 multi_ban 限制。
+	if strings.TrimSpace(ctx.OnlyPONumber) != "" {
+		multiBan = false
+	}
 
 	poNumbers := make([]string, 0, len(items))
 	for _, it := range items {
