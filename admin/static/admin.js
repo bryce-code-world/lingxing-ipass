@@ -274,6 +274,7 @@ const JOBS_DISPLAY_ORDER = [
 ];
 
 const JOBS_WITH_MULTI_BAN = new Set(["ack_to_dsco", "ship_to_dsco", "invoice_to_dsco"]);
+const JOBS_WITH_SYNC = new Set(["sync_stock"]);
 
 function normalizeJobConfigForDisplay(name, jc) {
   if (!jc || typeof jc !== "object") return jc;
@@ -283,6 +284,9 @@ function normalizeJobConfigForDisplay(name, jc) {
   if (Object.prototype.hasOwnProperty.call(jc, "size")) out.size = jc.size;
   if (JOBS_WITH_MULTI_BAN.has(name)) {
     out.multi_ban = Object.prototype.hasOwnProperty.call(jc, "multi_ban") ? jc.multi_ban : false;
+  }
+  if (JOBS_WITH_SYNC.has(name)) {
+    out.sync = Object.prototype.hasOwnProperty.call(jc, "sync") ? jc.sync : false;
   }
   for (const k of Object.keys(jc)) {
     if (!Object.prototype.hasOwnProperty.call(out, k)) out[k] = jc[k];

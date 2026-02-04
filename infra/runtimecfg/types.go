@@ -39,13 +39,13 @@ type JobConfig struct {
 
 	// Sync 为 true 时，表示执行“写回/同步”动作；为 false 时仅拉取并记录数据，不回写外部系统。
 	// 当前用于：sync_stock（领星库存 -> DSCO inventory）是否实际回写 DSCO。
-	Sync bool `json:"sync"`
+	Sync bool `json:"sync,omitempty"`
 
 	// MultiBan 为 true 时，禁止处理“多行/多数量”的订单（多 SKU / 单 SKU 多数量）。
 	// 说明：
 	// - MultiBan=false：不禁止（默认），允许执行该类订单。
 	// - MultiBan=true：禁止，任务会跳过该类订单（不推进状态）。
-	MultiBan bool `json:"multi_ban"`
+	MultiBan bool `json:"multi_ban,omitempty"`
 }
 
 // Mapping is DSCO -> LingXing (key=DSCO, value=LingXing).
