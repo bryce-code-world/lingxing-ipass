@@ -148,6 +148,8 @@ func (s *Server) apiListOrders(c *gin.Context) {
 		ID                int64    `json:"id"`
 		PONumber          string   `json:"po_number"`
 		DSCOCreateTime    int64    `json:"dsco_create_time"`
+		CreatedAt         int64    `json:"created_at"`
+		UpdatedAt         int64    `json:"updated_at"`
 		DSCOStatus        string   `json:"dsco_status"`
 		Status            int16    `json:"status"`
 		MSKUs             []string `json:"mskus"`
@@ -199,6 +201,8 @@ func (s *Server) apiListOrders(c *gin.Context) {
 			ID:                it.ID,
 			PONumber:          it.PONumber,
 			DSCOCreateTime:    it.DSCOCreateTime,
+			CreatedAt:         it.CreatedAt,
+			UpdatedAt:         it.UpdatedAt,
 			DSCOStatus:        it.DSCOStatus,
 			Status:            it.Status,
 			MSKUs:             []string(it.MSKUs),

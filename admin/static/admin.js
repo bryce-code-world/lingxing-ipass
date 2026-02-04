@@ -438,7 +438,7 @@ async function adminLoadOrders(offset) {
       const runBtn = canRun
         ? `<button class="btn" onclick='adminRunOneOrderByStatus(${poJSON}, ${it.status})'>Run</button>`
         : `<button class="btn" disabled title="status=5/6 disabled">Run</button>`;
-      tr.innerHTML = `<td>${it.id}</td><td><code>${it.po_number}</code></td><td title="${it.dsco_create_time}">${fmtUnixSec(it.dsco_create_time)}</td><td>${it.dsco_status || ""}</td><td>${it.status}</td><td>${it.warehouse_id}</td><td>${it.shipment}</td><td>${it.dsco_retailer_id || ""}</td><td title="${skuText.replace(/\"/g, '&quot;')}"><code>${skuShow}</code></td><td>${it.shipped_tracking_no}</td><td>${it.dsco_invoice_id}</td><td><div class="actions"><button class="btn" onclick="adminViewOrderDetail(${it.id})">View</button>${runBtn}<button class="btn" onclick='adminOpenEditOrderStatus(${poJSON}, ${it.status})'>Edit</button></div></td>`;
+      tr.innerHTML = `<td>${it.id}</td><td><code>${it.po_number}</code></td><td title="${it.dsco_create_time}">${fmtUnixSec(it.dsco_create_time)}</td><td title="${it.created_at}">${fmtUnixSec(it.created_at)}</td><td title="${it.updated_at}">${fmtUnixSec(it.updated_at)}</td><td>${it.dsco_status || ""}</td><td>${it.status}</td><td>${it.warehouse_id}</td><td>${it.shipment}</td><td>${it.dsco_retailer_id || ""}</td><td title="${skuText.replace(/\"/g, '&quot;')}"><code>${skuShow}</code></td><td>${it.shipped_tracking_no}</td><td>${it.dsco_invoice_id}</td><td><div class="actions"><button class="btn" onclick="adminViewOrderDetail(${it.id})">View</button>${runBtn}<button class="btn" onclick='adminOpenEditOrderStatus(${poJSON}, ${it.status})'>Edit</button></div></td>`;
       tbody.appendChild(tr);
     }
   } catch (e) {
