@@ -14,10 +14,10 @@ func DefaultConfig(domain string) Config {
 		Jobs: map[JobName]JobConfig{
 			JobPullDSCOOrders: {Enable: false, Cron: "0 5 * * * *", Size: 50},
 			JobPushToLingXing: {Enable: false, Cron: "0 10 * * * *", Size: 50},
-			JobAckToDSCO:      {Enable: false, Cron: "0 15 * * * *", Size: 50},
-			JobShipToDSCO:     {Enable: false, Cron: "0 20 * * * *", Size: 50},
-			JobInvoiceToDSCO:  {Enable: false, Cron: "0 25 * * * *", Size: 50},
-			JobSyncStock:      {Enable: false, Cron: "0 30 1 * * *", Size: 50},
+			JobAckToDSCO:      {Enable: false, Cron: "0 15 * * * *", Size: 50, MultiBan: false},
+			JobShipToDSCO:     {Enable: false, Cron: "0 20 * * * *", Size: 50, MultiBan: false},
+			JobInvoiceToDSCO:  {Enable: false, Cron: "0 25 * * * *", Size: 50, MultiBan: false},
+			JobSyncStock:      {Enable: false, Cron: "0 30 1 * * *", Size: 50, Sync: false},
 			JobPullSKUPair:    {Enable: false, Cron: "0 0 19 * * *", Size: 200}, // UTC 每晚 19 点，对应北京时间次日 3 点
 			JobCleanupExports: {Enable: true, Cron: "0 0 1 * * *", Size: 1},
 		},

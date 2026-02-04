@@ -5,6 +5,7 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -31,6 +32,96 @@ func ok(c *gin.Context, data any) {
 
 func fail(c *gin.Context, httpStatus int, code int, msg string) {
 	c.JSON(httpStatus, apiResp{Code: code, Message: msg})
+}
+
+func loadDisplayLocation(displayTimezone string) *time.Location {
+	tz := strings.TrimSpace(displayTimezone)
+	if tz == "" {
+		return time.UTC
+	}
+	loc, err := time.LoadLocation(tz)
+	if err != nil {
+		return time.UTC
+	}
+	return loc
+}
+
+func formatUnixSecToDisplay(sec int64, loc *time.Location) string {
+	if sec <= 0 {
+		return ""
+	}
+	if loc == nil {
+		loc = time.UTC
+	}
+	return time.Unix(sec, 0).In(loc).Format("2006-01-02 15:04:05.000")
+}
+
+func copyFile(srcPath string, dstPath string) error {
+	src, err := os.Open(srcPath)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+
+	dst, err := os.Create(dstPath)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = dst.Close() }()
+
+	if _, err := io.Copy(dst, src); err != nil {
+		return err
+	}
+	return dst.Sync()
+}
+
+func writeCSVExportFile(dir string, baseName string, write func(w *csv.Writer) error) (string, error) {
+	if strings.TrimSpace(dir) == "" {
+		return "", errors.New("export dir is empty")
+	}
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return "", err
+	}
+
+	tmp, err := os.CreateTemp(dir, baseName+"_*.csv.tmp")
+	if err != nil {
+		return "", err
+	}
+	tmpName := tmp.Name()
+
+	w := csv.NewWriter(tmp)
+	if err := write(w); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+		return "", err
+	}
+	w.Flush()
+	if err := w.Error(); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+		return "", err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+		return "", err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpName)
+		return "", err
+	}
+
+	nano := time.Now().UTC().UnixNano()
+	finalName := filepath.Join(dir, baseName+"_"+time.Now().UTC().Format("20060102_150405")+"_"+strconv.FormatInt(nano, 10)+".csv")
+
+	if err := os.Rename(tmpName, finalName); err != nil {
+		if err2 := copyFile(tmpName, finalName); err2 != nil {
+			_ = os.Remove(tmpName)
+			return "", err
+		}
+		_ = os.Remove(tmpName)
+	}
+	return finalName, nil
 }
 
 func (s *Server) apiLogin(c *gin.Context) {
@@ -490,49 +581,47 @@ func (s *Server) apiExportOrders(c *gin.Context) {
 	filter.Limit = 500
 
 	dir := s.env.Admin.Export.Dir
-	_ = os.MkdirAll(dir, 0755)
-	tmp, err := os.CreateTemp(dir, "dsco_order_sync_*.csv.tmp")
+	loc := loadDisplayLocation(s.env.Admin.DisplayTimezone)
+	finalName, err := writeCSVExportFile(dir, "dsco_order_sync", func(w *csv.Writer) error {
+		if err := w.Write([]string{"id", "po_number", "dsco_create_time", "created_at", "updated_at", "dsco_status", "dsco_retailer_id", "status", "warehouse_id", "shipment", "shipped_tracking_no", "dsco_invoice_id"}); err != nil {
+			return err
+		}
+		offset := 0
+		for {
+			filter.Offset = offset
+			items, total, err := s.orderStore.ListByCreateTimeAsc(c.Request.Context(), filter)
+			if err != nil {
+				return err
+			}
+			for _, it := range items {
+				if err := w.Write([]string{
+					strconv.FormatInt(it.ID, 10),
+					it.PONumber,
+					formatUnixSecToDisplay(it.DSCOCreateTime, loc),
+					formatUnixSecToDisplay(it.CreatedAt, loc),
+					formatUnixSecToDisplay(it.UpdatedAt, loc),
+					it.DSCOStatus,
+					it.DSCOREtailerID,
+					strconv.FormatInt(int64(it.Status), 10),
+					it.WarehouseID,
+					it.Shipment,
+					it.ShippedTrackingNo,
+					it.DSCOInvoiceID,
+				}); err != nil {
+					return err
+				}
+			}
+			offset += len(items)
+			if offset >= int(total) || len(items) == 0 {
+				break
+			}
+		}
+		return nil
+	})
 	if err != nil {
 		fail(c, http.StatusInternalServerError, 500, err.Error())
 		return
 	}
-	defer tmp.Close()
-
-	w := csv.NewWriter(tmp)
-	_ = w.Write([]string{"id", "po_number", "dsco_create_time", "dsco_status", "dsco_retailer_id", "status", "warehouse_id", "shipment", "shipped_tracking_no", "dsco_invoice_id"})
-
-	offset := 0
-	for {
-		filter.Offset = offset
-		items, total, err := s.orderStore.List(c.Request.Context(), filter)
-		if err != nil {
-			fail(c, http.StatusInternalServerError, 500, err.Error())
-			return
-		}
-		for _, it := range items {
-			_ = w.Write([]string{
-				strconv.FormatInt(it.ID, 10),
-				it.PONumber,
-				strconv.FormatInt(it.DSCOCreateTime, 10),
-				it.DSCOStatus,
-				it.DSCOREtailerID,
-				strconv.FormatInt(int64(it.Status), 10),
-				it.WarehouseID,
-				it.Shipment,
-				it.ShippedTrackingNo,
-				it.DSCOInvoiceID,
-			})
-		}
-		offset += len(items)
-		if offset >= int(total) || len(items) == 0 {
-			break
-		}
-	}
-	w.Flush()
-	_ = tmp.Sync()
-
-	finalName := filepath.Join(dir, "dsco_order_sync_"+time.Now().UTC().Format("20060102_150405")+".csv")
-	_ = os.Rename(tmp.Name(), finalName)
 	c.FileAttachment(finalName, filepath.Base(finalName))
 }
 
@@ -550,49 +639,44 @@ func (s *Server) apiExportWarehouseSync(c *gin.Context) {
 	filter.Limit = 500
 
 	dir := s.env.Admin.Export.Dir
-	_ = os.MkdirAll(dir, 0755)
-	tmp, err := os.CreateTemp(dir, "dsco_warehouse_sync_*.csv.tmp")
+	finalName, err := writeCSVExportFile(dir, "dsco_warehouse_sync", func(w *csv.Writer) error {
+		if err := w.Write([]string{"id", "sync_time", "dsco_warehouse_id", "dsco_warehouse_sku", "dsco_warehouse_num", "lingxing_warehouse_id", "lingxing_warehouse_sku", "lingxing_warehouse_num", "status", "reason"}); err != nil {
+			return err
+		}
+		offset := 0
+		for {
+			filter.Offset = offset
+			items, total, err := s.warehouseStore.List(c.Request.Context(), filter)
+			if err != nil {
+				return err
+			}
+			for _, it := range items {
+				if err := w.Write([]string{
+					strconv.FormatInt(it.ID, 10),
+					strconv.FormatInt(it.SyncTime, 10),
+					it.DSCOWarehouseID,
+					it.DSCOWarehouseSKU,
+					strconv.Itoa(it.DSCOWarehouseNum),
+					it.LingXingWarehouseID,
+					it.LingXingWarehouseSKU,
+					strconv.Itoa(it.LingXingWarehouseNum),
+					strconv.FormatInt(int64(it.Status), 10),
+					it.Reason,
+				}); err != nil {
+					return err
+				}
+			}
+			offset += len(items)
+			if offset >= int(total) || len(items) == 0 {
+				break
+			}
+		}
+		return nil
+	})
 	if err != nil {
 		fail(c, http.StatusInternalServerError, 500, err.Error())
 		return
 	}
-	defer tmp.Close()
-
-	w := csv.NewWriter(tmp)
-	_ = w.Write([]string{"id", "sync_time", "dsco_warehouse_id", "dsco_warehouse_sku", "dsco_warehouse_num", "lingxing_warehouse_id", "lingxing_warehouse_sku", "lingxing_warehouse_num", "status", "reason"})
-
-	offset := 0
-	for {
-		filter.Offset = offset
-		items, total, err := s.warehouseStore.List(c.Request.Context(), filter)
-		if err != nil {
-			fail(c, http.StatusInternalServerError, 500, err.Error())
-			return
-		}
-		for _, it := range items {
-			_ = w.Write([]string{
-				strconv.FormatInt(it.ID, 10),
-				strconv.FormatInt(it.SyncTime, 10),
-				it.DSCOWarehouseID,
-				it.DSCOWarehouseSKU,
-				strconv.Itoa(it.DSCOWarehouseNum),
-				it.LingXingWarehouseID,
-				it.LingXingWarehouseSKU,
-				strconv.Itoa(it.LingXingWarehouseNum),
-				strconv.FormatInt(int64(it.Status), 10),
-				it.Reason,
-			})
-		}
-		offset += len(items)
-		if offset >= int(total) || len(items) == 0 {
-			break
-		}
-	}
-	w.Flush()
-	_ = tmp.Sync()
-
-	finalName := filepath.Join(dir, "dsco_warehouse_sync_"+time.Now().UTC().Format("20060102_150405")+".csv")
-	_ = os.Rename(tmp.Name(), finalName)
 	c.FileAttachment(finalName, filepath.Base(finalName))
 }
 

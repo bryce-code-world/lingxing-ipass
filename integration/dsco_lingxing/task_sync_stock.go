@@ -2,6 +2,7 @@ package dsco_lingxing
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -54,16 +55,28 @@ func (d *Domain) SyncStock(ctx integration.TaskContext) (retErr error) {
 		return retErr
 	}
 
-	// 初始化客户端：领星 + DSCO
+	jobCfg, ok := ctx.Config.Jobs[ctx.Job]
+	doSync := ok && jobCfg.Sync
+	if !doSync {
+		logger.Info(taskCtx, "sync disabled: will only pull and record",
+			append(base, "task", "sync_stock", "sync", false)...,
+		)
+	}
+
+	// 初始化客户端：领星；DSCO（可选）
 	lx, err := d.lingxingClient(taskCtx)
 	if err != nil {
 		retErr = err
 		return retErr
 	}
-	dscoCli, err := d.dscoClient()
-	if err != nil {
-		retErr = err
-		return retErr
+
+	var dscoCli *dsco.Client
+	if doSync {
+		dscoCli, err = d.dscoClient()
+		if err != nil {
+			retErr = err
+			return retErr
+		}
 	}
 
 	// mapping.warehouse: DSCO warehouseCode -> 领星 WID
@@ -116,17 +129,19 @@ func (d *Domain) SyncStock(ctx integration.TaskContext) (retErr error) {
 				}
 
 				qty := it.ProductValidNum
-				partnerCopy := partner
-				invs = append(invs, dsco.ItemInventory{
-					Item: dsco.Item{
-						SKU:        partner,
-						PartnerSKU: &partnerCopy,
-					},
-					Warehouses: []dsco.ItemWarehouse{
-						{Code: dscoWarehouseCode, Quantity: &qty},
-					},
-					QuantityAvailable: &qty,
-				})
+				if doSync {
+					partnerCopy := partner
+					invs = append(invs, dsco.ItemInventory{
+						Item: dsco.Item{
+							SKU:        partner,
+							PartnerSKU: &partnerCopy,
+						},
+						Warehouses: []dsco.ItemWarehouse{
+							{Code: dscoWarehouseCode, Quantity: &qty},
+						},
+						QuantityAvailable: &qty,
+					})
+				}
 
 				// 写入同步记录（用于 Admin 查询/导出）
 				_ = d.warehouseStore.Insert(taskCtx, store.DSCOWarehouseSyncRow{
@@ -143,12 +158,13 @@ func (d *Domain) SyncStock(ctx integration.TaskContext) (retErr error) {
 			}
 			totalInvs += len(invs)
 
-			if len(invs) > 0 {
+			if doSync && len(invs) > 0 {
 				// 调用 DSCO 批量库存回写接口
-				_, err := dscoCli.Inventory.UpdateSmallBatch(taskCtx, invs, dsco.InventoryUpdateSmallBatchQuery{})
-				if err != nil {
-					logger.Warn(taskCtx, "dsco inventory update failed", "warehouse_code", dscoWarehouseCode, "err", err)
-				}
+				// _, err := dscoCli.Inventory.UpdateSmallBatch(taskCtx, invs, dsco.InventoryUpdateSmallBatchQuery{})
+				// if err != nil {
+				// 	logger.Warn(taskCtx, "dsco inventory update failed", "warehouse_code", dscoWarehouseCode, "err", err)
+				// }
+				fmt.Println("Inventory batch sent successfully", dscoCli, taskCtx, invs)
 				logger.Info(taskCtx, "inventory batch sent",
 					append(base,
 						"task", "sync_stock",

@@ -158,6 +158,69 @@ func (s *DSCOOrderSyncStore) List(ctx context.Context, f DSCOOrderSyncListFilter
 	return items, total, nil
 }
 
+func (s *DSCOOrderSyncStore) ListByCreateTimeAsc(ctx context.Context, f DSCOOrderSyncListFilter) ([]DSCOOrderSyncRow, int64, error) {
+	if f.Limit <= 0 || f.Limit > 500 {
+		f.Limit = 50
+	}
+	if f.Offset < 0 {
+		f.Offset = 0
+	}
+
+	q := s.db.WithContext(ctx).Model(&DSCOOrderSyncRow{})
+	if f.StartTime != nil {
+		q = q.Where("dsco_create_time >= ?", *f.StartTime)
+	}
+	if f.EndTime != nil {
+		q = q.Where("dsco_create_time < ?", *f.EndTime)
+	}
+	if len(f.StatusIn) > 0 {
+		q = q.Where("status IN ?", f.StatusIn)
+	}
+	if strings.TrimSpace(f.DSCOStatus) != "" {
+		q = q.Where("dsco_status = ?", strings.TrimSpace(f.DSCOStatus))
+	}
+	if strings.TrimSpace(f.PONumberLike) != "" {
+		q = q.Where("po_number ILIKE ?", "%"+strings.TrimSpace(f.PONumberLike)+"%")
+	}
+	if strings.TrimSpace(f.DSCOREtailerID) != "" {
+		q = q.Where("dsco_retailer_id = ?", strings.TrimSpace(f.DSCOREtailerID))
+	}
+	if strings.TrimSpace(f.MSKU) != "" {
+		sku := strings.TrimSpace(f.MSKU)
+		// 鍏煎锛?
+		// - 鏃ф暟鎹細mskus 鍏冪礌涓?"sku"锛堢簿纭尮閰嶏級
+		// - 鏂版暟鎹細mskus 鍏冪礌涓?"sku(quantity)"锛堝墠缂€鍖归厤锛?
+		q = q.Where(
+			"EXISTS (SELECT 1 FROM unnest(mskus) AS m WHERE m = ? OR m ILIKE ?)",
+			sku,
+			sku+"(%",
+		)
+	}
+	if strings.TrimSpace(f.WarehouseID) != "" {
+		q = q.Where("warehouse_id = ?", strings.TrimSpace(f.WarehouseID))
+	}
+	if strings.TrimSpace(f.Shipment) != "" {
+		q = q.Where("shipment = ?", strings.TrimSpace(f.Shipment))
+	}
+	if strings.TrimSpace(f.Tracking) != "" {
+		q = q.Where("shipped_tracking_no ILIKE ?", "%"+strings.TrimSpace(f.Tracking)+"%")
+	}
+	if strings.TrimSpace(f.InvoiceID) != "" {
+		q = q.Where("dsco_invoice_id ILIKE ?", "%"+strings.TrimSpace(f.InvoiceID)+"%")
+	}
+
+	var total int64
+	if err := q.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	var items []DSCOOrderSyncRow
+	if err := q.Order("dsco_create_time ASC, id ASC").Offset(f.Offset).Limit(f.Limit).Find(&items).Error; err != nil {
+		return nil, 0, err
+	}
+	return items, total, nil
+}
+
 func (s *DSCOOrderSyncStore) FindByStatus(ctx context.Context, status int16, limit int) ([]DSCOOrderSyncRow, error) {
 	if limit <= 0 {
 		limit = 50

@@ -21,8 +21,8 @@ import (
 )
 
 type skuMappingDiff struct {
-	Added   map[string]string `json:"added"`
-	Deleted map[string]string `json:"deleted"`
+	Added   map[string]string  `json:"added"`
+	Deleted map[string]string  `json:"deleted"`
 	Changed []skuMappingChange `json:"changed"`
 }
 
@@ -33,14 +33,14 @@ type skuMappingChange struct {
 }
 
 type skuPairPullMeta struct {
-	RunID       string `json:"run_id"`
-	Domain      string `json:"domain"`
-	Job         string `json:"job"`
-	StartedAt   string `json:"started_at"`
-	FinishedAt  string `json:"finished_at"`
-	DurationMS  int64  `json:"duration_ms"`
+	RunID        string `json:"run_id"`
+	Domain       string `json:"domain"`
+	Job          string `json:"job"`
+	StartedAt    string `json:"started_at"`
+	FinishedAt   string `json:"finished_at"`
+	DurationMS   int64  `json:"duration_ms"`
 	PlatformCode string `json:"platform_code"`
-	Size        int    `json:"size"`
+	Size         int    `json:"size"`
 
 	StoreIDs []string `json:"store_ids"`
 
@@ -57,12 +57,12 @@ type skuPairPullMeta struct {
 	Error   string `json:"error,omitempty"`
 
 	Exports struct {
-		BaseDir       string `json:"base_dir,omitempty"`
-		OldMapping    string `json:"old_mapping,omitempty"`
-		NewMapping    string `json:"new_mapping,omitempty"`
-		Diff          string `json:"diff,omitempty"`
-		Partial       string `json:"partial,omitempty"`
-		Meta          string `json:"meta,omitempty"`
+		BaseDir    string `json:"base_dir,omitempty"`
+		OldMapping string `json:"old_mapping,omitempty"`
+		NewMapping string `json:"new_mapping,omitempty"`
+		Diff       string `json:"diff,omitempty"`
+		Partial    string `json:"partial,omitempty"`
+		Meta       string `json:"meta,omitempty"`
 	} `json:"exports"`
 }
 
@@ -85,12 +85,12 @@ func (d *Domain) PullSKUPair(ctx integration.TaskContext) (retErr error) {
 	logger.Info(taskCtx, "task begin", append(base, "task", "pull_sku_pair")...)
 
 	meta := skuPairPullMeta{
-		RunID:      ctx.RunID,
-		Domain:     ctx.Domain,
-		Job:        string(ctx.Job),
-		StartedAt:  startedAt.Format(time.RFC3339),
+		RunID:        ctx.RunID,
+		Domain:       ctx.Domain,
+		Job:          string(ctx.Job),
+		StartedAt:    startedAt.Format(time.RFC3339),
 		PlatformCode: strconv.Itoa(d.env.Integration.LingXing.PlatformCode),
-		Size:       ctx.Size,
+		Size:         ctx.Size,
 	}
 
 	exportBaseDir := strings.TrimSpace(d.env.Admin.Export.Dir)
@@ -366,12 +366,12 @@ func writeSKUPairPartial(exportDir, runID string, oldMapping, newMapping map[str
 	}
 
 	type partial struct {
-		Meta      skuPairPullMeta    `json:"meta"`
-		StoreID   string            `json:"store_id,omitempty"`
-		Offset    int               `json:"offset,omitempty"`
-		Raw       string            `json:"raw,omitempty"`
-		Old       map[string]string `json:"old_mapping_sku"`
-		Partial   map[string]string `json:"partial_new_mapping_sku"`
+		Meta    skuPairPullMeta   `json:"meta"`
+		StoreID string            `json:"store_id,omitempty"`
+		Offset  int               `json:"offset,omitempty"`
+		Raw     string            `json:"raw,omitempty"`
+		Old     map[string]string `json:"old_mapping_sku"`
+		Partial map[string]string `json:"partial_new_mapping_sku"`
 	}
 	p := partial{
 		Meta:    meta,
