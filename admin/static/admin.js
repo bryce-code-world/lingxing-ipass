@@ -269,6 +269,7 @@ const JOBS_DISPLAY_ORDER = [
   "ship_to_dsco",
   "invoice_to_dsco",
   "sync_stock",
+  "pull_sku_pair",
   "cleanup_exports",
 ];
 

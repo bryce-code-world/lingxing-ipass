@@ -84,12 +84,20 @@ func (r *Runner) Run(ctx context.Context, req RunRequest) error {
 		"cfg_updated_at", rc.UpdatedAt,
 	)
 
+	supportedJobs := r.reg.SupportedJobsSet()
+
 	err = task(TaskContext{
-		Ctx:          ctx,
-		Domain:       req.Domain,
-		Job:          req.Job,
-		Trigger:      req.Trigger,
-		Size:         size,
+		Ctx:     ctx,
+		Domain:  req.Domain,
+		Job:     req.Job,
+		Trigger: req.Trigger,
+		Size:    size,
+		SnapshotRuntimeConfig: func(domain string) (runtimecfg.RuntimeConfig, bool) {
+			return r.cfgMgr.Snapshot(domain)
+		},
+		UpdateRuntimeConfig: func(taskCtx context.Context, domain string, cfg runtimecfg.Config) error {
+			return r.cfgMgr.Update(taskCtx, domain, cfg, supportedJobs)
+		},
 		OnlyPONumber: req.OnlyPONumber,
 		RunID:        runID,
 		Config:       rc.Config,

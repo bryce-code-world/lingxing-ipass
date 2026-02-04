@@ -15,6 +15,7 @@ const (
 	JobShipToDSCO     JobName = "ship_to_dsco"
 	JobInvoiceToDSCO  JobName = "invoice_to_dsco"
 	JobSyncStock      JobName = "sync_stock"
+	JobPullSKUPair    JobName = "pull_sku_pair"
 	JobCleanupExports JobName = "cleanup_exports"
 )
 

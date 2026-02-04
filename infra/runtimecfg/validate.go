@@ -18,6 +18,7 @@ func DefaultConfig(domain string) Config {
 			JobShipToDSCO:     {Enable: false, Cron: "0 20 * * * *", Size: 50},
 			JobInvoiceToDSCO:  {Enable: false, Cron: "0 25 * * * *", Size: 50},
 			JobSyncStock:      {Enable: false, Cron: "0 30 1 * * *", Size: 50},
+			JobPullSKUPair:    {Enable: false, Cron: "0 0 19 * * *", Size: 200}, // UTC 每晚 19 点，对应北京时间次日 3 点
 			JobCleanupExports: {Enable: true, Cron: "0 0 1 * * *", Size: 1},
 		},
 		Mapping: Mapping{

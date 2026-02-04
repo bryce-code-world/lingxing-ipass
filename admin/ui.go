@@ -33,6 +33,8 @@ func jobDesc(job runtimecfg.JobName) string {
 		return "回传发票到 DSCO"
 	case runtimecfg.JobSyncStock:
 		return "同步库存到领星"
+	case runtimecfg.JobPullSKUPair:
+		return "拉取 SKU 配对数据"
 	case runtimecfg.JobCleanupExports:
 		return "清理导出文件"
 	default:
