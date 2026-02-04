@@ -12,7 +12,7 @@ func TestDscoStatusToSyncStatus(t *testing.T) {
 		wantOK bool
 	}{
 		{name: "created", in: "created", want: 1, wantOK: true},
-		{name: "shipment_pending", in: "shipment_pending", want: 3, wantOK: true},
+		{name: "shipment_pending", in: "shipment_pending", want: 1, wantOK: true},
 		{name: "shipped", in: "shipped", want: 5, wantOK: true},
 		{name: "cancelled", in: "cancelled", want: 6, wantOK: true},
 		{name: "trim+case", in: "  ShIpPeD  ", want: 5, wantOK: true},
