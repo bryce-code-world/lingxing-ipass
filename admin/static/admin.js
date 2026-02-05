@@ -1,5 +1,14 @@
 function qs(id) { return document.getElementById(id); }
 
+function escapeHTML(s) {
+  return String(s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 let __busyCount = 0;
 
 function setButtonsDisabled(disabled) {
@@ -401,6 +410,82 @@ let ordersOffset = 0;
 let ordersLimit = 50;
 let ordersTotal = 0;
 
+const ORDERS_COL_STORAGE_KEY = "orders_columns_v1";
+const ORDERS_COLUMNS = [
+  { key: "id", label: "id", defaultVisible: false },
+  { key: "po_number", label: "po_number", defaultVisible: true },
+  { key: "dsco_create_time", label: "dsco_create_time", defaultVisible: true },
+  { key: "pulled_at", label: "pulled_at", defaultVisible: true },
+  { key: "updated_at", label: "updated_at", defaultVisible: true },
+  { key: "dsco_status", label: "dsco_status", defaultVisible: true },
+  { key: "status", label: "status", defaultVisible: true },
+  { key: "wh_ship", label: "warehouse-shipment", defaultVisible: true },
+  { key: "dsco_retailer_id", label: "dsco_retailer_id", defaultVisible: false },
+  { key: "sku", label: "sku", defaultVisible: true },
+  { key: "tracking", label: "tracking", defaultVisible: true },
+  { key: "invoice_id", label: "invoice_id", defaultVisible: true },
+  { key: "actions", label: "actions", defaultVisible: true },
+];
+
+let ordersColumnState = null;
+
+function loadOrdersColumnState() {
+  try {
+    const raw = localStorage.getItem(ORDERS_COL_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") return parsed;
+    }
+  } catch (_) {}
+  const d = {};
+  for (const c of ORDERS_COLUMNS) d[c.key] = !!c.defaultVisible;
+  return d;
+}
+
+function saveOrdersColumnState() {
+  try {
+    localStorage.setItem(ORDERS_COL_STORAGE_KEY, JSON.stringify(ordersColumnState || {}));
+  } catch (_) {}
+}
+
+function applyOrdersColumnVisibility() {
+  const table = qs("ordersTable");
+  if (!table || !ordersColumnState) return;
+  for (const c of ORDERS_COLUMNS) {
+    const show = ordersColumnState[c.key] !== false;
+    for (const el of table.querySelectorAll(`[data-col="${c.key}"]`)) {
+      el.classList.toggle("col-hidden", !show);
+    }
+  }
+}
+
+function adminInitOrdersColumns() {
+  const wrap = qs("ordersColumns");
+  const table = qs("ordersTable");
+  if (!wrap || !table) return;
+
+  ordersColumnState = loadOrdersColumnState();
+  wrap.innerHTML = `<div class="muted">Columns:</div>`;
+  for (const c of ORDERS_COLUMNS) {
+    const id = "ordersCol_" + c.key;
+    const checked = ordersColumnState[c.key] !== false;
+    const label = document.createElement("label");
+    label.className = "col-toggle";
+    label.htmlFor = id;
+    label.innerHTML = `<input type="checkbox" id="${id}" ${checked ? "checked" : ""} /> ${escapeHTML(c.label)}`;
+    const input = label.querySelector("input");
+    if (input) {
+      input.addEventListener("change", () => {
+        ordersColumnState[c.key] = !!input.checked;
+        saveOrdersColumnState();
+        applyOrdersColumnVisibility();
+      });
+    }
+    wrap.appendChild(label);
+  }
+  applyOrdersColumnVisibility();
+}
+
 function ordersFilter() {
   const f = {};
   const set = (k, v) => { if (v !== "" && v !== null && v !== undefined) f[k] = v; };
@@ -437,15 +522,40 @@ async function adminLoadOrders(offset) {
       const poJSON = JSON.stringify(it.po_number || "");
       const skus = Array.isArray(it.mskus) ? it.mskus.filter(s => String(s || "").trim() !== "") : [];
       const skuText = skus.join(", ");
-      const skuShow = skuText.length > 40 ? (skuText.slice(0, 40) + "...") : skuText;
+      const maxLines = 8;
+      const skuLines = skus.slice(0, maxLines);
+      const skuMore = Math.max(0, skus.length - skuLines.length);
+      const skuHTML = `<div class="sku-lines">`
+        + skuLines.map(s => `<div><code>${escapeHTML(s)}</code></div>`).join("")
+        + (skuMore > 0 ? `<div class="muted">+${skuMore} more</div>` : "")
+        + `</div>`;
       const tr = document.createElement("tr");
       const canRun = Number(it.status) >= 1 && Number(it.status) <= 4;
       const runBtn = canRun
         ? `<button class="btn" onclick='adminRunOneOrderByStatus(${poJSON}, ${it.status})'>Run</button>`
         : `<button class="btn" disabled title="status=5/6 disabled">Run</button>`;
-      tr.innerHTML = `<td>${it.id}</td><td><code>${it.po_number}</code></td><td title="${it.dsco_create_time}">${fmtUnixSec(it.dsco_create_time)}</td><td title="${it.created_at}">${fmtUnixSec(it.created_at)}</td><td title="${it.updated_at}">${fmtUnixSec(it.updated_at)}</td><td>${it.dsco_status || ""}</td><td>${it.status}</td><td>${it.warehouse_id}</td><td>${it.shipment}</td><td>${it.dsco_retailer_id || ""}</td><td title="${skuText.replace(/\"/g, '&quot;')}"><code>${skuShow}</code></td><td>${it.shipped_tracking_no}</td><td>${it.dsco_invoice_id}</td><td><div class="actions"><button class="btn" onclick="adminViewOrderDetail(${it.id})">View</button>${runBtn}<button class="btn" onclick='adminOpenEditOrderStatus(${poJSON}, ${it.status})'>Edit</button></div></td>`;
+      const wh = String(it.warehouse_id || "").trim();
+      const sp = String(it.shipment || "").trim();
+      const whShip = (wh && sp) ? `${wh}-${sp}` : (wh || sp || "");
+      const tracking = String(it.shipped_tracking_no || "").trim();
+      const invoiceID = String(it.dsco_invoice_id || "").trim();
+      tr.innerHTML =
+        `<td data-col="id">${escapeHTML(it.id)}</td>`
+        + `<td data-col="po_number"><code>${escapeHTML(it.po_number)}</code></td>`
+        + `<td data-col="dsco_create_time" title="${escapeHTML(it.dsco_create_time)}">${fmtUnixSec(it.dsco_create_time)}</td>`
+        + `<td data-col="pulled_at" title="${escapeHTML(it.created_at)}">${fmtUnixSec(it.created_at)}</td>`
+        + `<td data-col="updated_at" title="${escapeHTML(it.updated_at)}">${fmtUnixSec(it.updated_at)}</td>`
+        + `<td data-col="dsco_status">${escapeHTML(it.dsco_status || "")}</td>`
+        + `<td data-col="status">${escapeHTML(it.status)}</td>`
+        + `<td data-col="wh_ship">${escapeHTML(whShip)}</td>`
+        + `<td data-col="dsco_retailer_id">${escapeHTML(it.dsco_retailer_id || "")}</td>`
+        + `<td data-col="sku" title="${escapeHTML(skuText)}">${skuHTML}</td>`
+        + `<td data-col="tracking"><code>${escapeHTML(tracking)}</code></td>`
+        + `<td data-col="invoice_id"><code>${escapeHTML(invoiceID)}</code></td>`
+        + `<td data-col="actions"><div class="actions"><button class="btn" onclick="adminViewOrderDetail(${it.id})">View</button>${runBtn}<button class="btn" onclick='adminOpenEditOrderStatus(${poJSON}, ${it.status})'>Edit</button></div></td>`;
       tbody.appendChild(tr);
     }
+    applyOrdersColumnVisibility();
   } catch (e) {
     showToast("Orders: " + e.message);
   }
@@ -712,7 +822,7 @@ async function adminExportWarehouses() {
 document.addEventListener("DOMContentLoaded", () => {
   setTZLabel();
   renderTimestamps();
-  if (qs("ordersTable")) adminLoadOrders(0);
+  if (qs("ordersTable")) { adminInitOrdersColumns(); adminLoadOrders(0); }
   if (qs("whTable")) {
     adminLoadWarehouseOptions();
     adminLoadWarehouses(0);

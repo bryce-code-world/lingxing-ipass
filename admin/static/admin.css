@@ -146,13 +146,28 @@ body {
 .table code { font-size: 12px; }
 
 /* Orders 列表：优先横向滚动，避免挤压导致跨行 */
-#ordersTable { min-width: 1400px; }
+#ordersTable { min-width: 1200px; }
 #ordersTable th, #ordersTable td { white-space: nowrap; vertical-align: middle; }
-#ordersTable td:nth-child(9) { /* sku */
-  max-width: 320px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+#ordersTable [data-col="sku"] { white-space: normal; max-width: 280px; }
+#ordersTable [data-col="sku"] .sku-lines { display: flex; flex-direction: column; gap: 2px; }
+#ordersTable [data-col="sku"] .sku-lines code { white-space: nowrap; }
+#ordersTable [data-col="tracking"] { max-width: 260px; }
+#ordersTable [data-col="tracking"] code { white-space: nowrap; }
+
+.col-hidden { display: none !important; }
+
+#ordersColumns {
+  gap: 10px;
 }
+.col-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+  user-select: none;
+}
+.col-toggle input { transform: translateY(0.5px); }
 
 .actions {
   display: inline-flex;
