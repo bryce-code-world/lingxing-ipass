@@ -20,6 +20,7 @@ func DefaultConfig(domain string) Config {
 			JobSyncStock:      {Enable: false, Cron: "0 30 1 * * *", Size: 50, Sync: false},
 			JobPullSKUPair:    {Enable: false, Cron: "0 0 19 * * *", Size: 200}, // UTC 每晚 19 点，对应北京时间次日 3 点
 			JobCleanupExports: {Enable: true, Cron: "0 0 1 * * *", Size: 1},
+			JobCheckOrders:    {Enable: false, Cron: "0 0 2 * * *", Size: 200},
 		},
 		Mapping: Mapping{
 			// 初始默认值：用于快速跑通闭环（可在 Admin 后台随时修改并热更新）。

@@ -87,6 +87,7 @@ func (s *Server) registerRoutes() {
 	authed.GET("/dsco_order_sync/detail", s.apiOrderDetail)
 	authed.POST("/dsco_order_sync/pull", s.apiManualPullOrders)
 	authed.POST("/dsco_order_sync/run_one", s.apiRunOneOrderByStatus)
+	authed.POST("/dsco_order_sync/check", s.apiCheckOrders)
 	authed.PUT("/dsco_order_sync/status", s.apiUpdateOrderStatus)
 
 	authed.GET("/dsco_warehouse_sync/list", s.apiListWarehouseSync)

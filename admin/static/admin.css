@@ -154,6 +154,35 @@ body {
 #ordersTable [data-col="tracking"] { max-width: 260px; }
 #ordersTable [data-col="tracking"] code { white-space: nowrap; }
 
+.check-flag {
+  margin-left: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 9px;
+  font-weight: 700;
+  line-height: 1;
+}
+.check-flag.ok {
+  color: #15803d;
+  background: rgba(22, 163, 74, 0.10);
+  border: 1px solid rgba(22, 163, 74, 0.20);
+}
+button.check-flag {
+  border: 1px solid transparent;
+  background: transparent;
+  cursor: pointer;
+  padding: 0;
+}
+button.check-flag.bad {
+  color: #b91c1c;
+  background: rgba(255, 59, 48, 0.08);
+  border: 1px solid rgba(255, 59, 48, 0.18);
+}
+button.check-flag.bad:hover { filter: brightness(0.98); }
+
 .col-hidden { display: none !important; }
 
 #ordersColumns {

@@ -13,4 +13,5 @@ func Register(reg *integration.Registry, d *Domain) {
 	reg.Register(runtimecfg.JobInvoiceToDSCO, d.InvoiceToDSCO)
 	reg.Register(runtimecfg.JobSyncStock, d.SyncStock)
 	reg.Register(runtimecfg.JobPullSKUPair, d.PullSKUPair)
+	reg.Register(runtimecfg.JobCheckOrders, d.CheckOrders)
 }

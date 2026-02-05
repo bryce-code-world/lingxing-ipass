@@ -401,6 +401,47 @@ func (s *Server) apiRunOneOrderByStatus(c *gin.Context) {
 	})
 }
 
+func (s *Server) apiCheckOrders(c *gin.Context) {
+	var body struct {
+		Start    int64  `json:"start"`
+		End      int64  `json:"end"`
+		PONumber string `json:"po_number"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		fail(c, http.StatusBadRequest, 400, "invalid json")
+		return
+	}
+	po := strings.TrimSpace(body.PONumber)
+	if po == "" {
+		if body.Start <= 0 || body.End <= 0 || body.End <= body.Start {
+			fail(c, http.StatusBadRequest, 400, "missing or invalid time range")
+			return
+		}
+	}
+
+	override := integration.CheckOrdersOverride{Start: body.Start, End: body.End}
+	res, err := s.runner.RunWithResult(c.Request.Context(), integration.RunRequest{
+		Domain:       runtimecfg.DomainDSCOLingXing,
+		Job:          runtimecfg.JobCheckOrders,
+		Trigger:      integration.TriggerManual,
+		OnlyPONumber: po,
+		Override:     override,
+	})
+	if err != nil {
+		if errors.Is(err, integration.ErrJobRunning) {
+			fail(c, http.StatusConflict, 409, "job running")
+			return
+		}
+		fail(c, http.StatusBadRequest, 400, err.Error())
+		return
+	}
+	if res == nil {
+		fail(c, http.StatusInternalServerError, 500, "task returned empty result")
+		return
+	}
+	ok(c, res)
+}
+
 func (s *Server) apiOrderDetail(c *gin.Context) {
 	type orderDetail struct {
 		ID                int64           `json:"id"`

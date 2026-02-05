@@ -409,6 +409,8 @@ async function adminSaveConfig() {
 let ordersOffset = 0;
 let ordersLimit = 50;
 let ordersTotal = 0;
+let ordersCheckByPO = {};
+let ordersCheckMissingLocal = [];
 
 const ORDERS_COL_STORAGE_KEY = "orders_columns_v1";
 const ORDERS_COLUMNS = [
@@ -519,7 +521,8 @@ async function adminLoadOrders(offset) {
     if (!tbody) return;
     tbody.innerHTML = "";
     for (const it of (data.items || [])) {
-      const poJSON = JSON.stringify(it.po_number || "");
+      const po = String(it.po_number || "").trim();
+      const poJSON = JSON.stringify(po);
       const skus = Array.isArray(it.mskus) ? it.mskus.filter(s => String(s || "").trim() !== "") : [];
       const skuText = skus.join(", ");
       const maxLines = 8;
@@ -539,6 +542,18 @@ async function adminLoadOrders(offset) {
       const whShip = (wh && sp) ? `${wh}-${sp}` : (wh || sp || "");
       const tracking = String(it.shipped_tracking_no || "").trim();
       const invoiceID = String(it.dsco_invoice_id || "").trim();
+
+      const check = ordersCheckByPO && po ? ordersCheckByPO[po] : null;
+      let checkHTML = "";
+      if (check && typeof check === "object") {
+        if (check.ok) {
+          checkHTML = `<span class="check-flag ok" title="Check OK">✓</span>`;
+        } else {
+          const title = escapeHTML(String((check.code || "") + ": " + (check.message || "")).trim());
+          checkHTML = `<button class="check-flag bad" type="button" title="${title}" onclick='adminOpenCheckDetail(${poJSON})'>!</button>`;
+        }
+      }
+      const statusHTML = `${escapeHTML(it.status)}${checkHTML}`;
       tr.innerHTML =
         `<td data-col="id">${escapeHTML(it.id)}</td>`
         + `<td data-col="po_number"><code>${escapeHTML(it.po_number)}</code></td>`
@@ -546,13 +561,13 @@ async function adminLoadOrders(offset) {
         + `<td data-col="pulled_at" title="${escapeHTML(it.created_at)}">${fmtUnixSec(it.created_at)}</td>`
         + `<td data-col="updated_at" title="${escapeHTML(it.updated_at)}">${fmtUnixSec(it.updated_at)}</td>`
         + `<td data-col="dsco_status">${escapeHTML(it.dsco_status || "")}</td>`
-        + `<td data-col="status">${escapeHTML(it.status)}</td>`
+        + `<td data-col="status">${statusHTML}</td>`
         + `<td data-col="wh_ship">${escapeHTML(whShip)}</td>`
         + `<td data-col="dsco_retailer_id">${escapeHTML(it.dsco_retailer_id || "")}</td>`
         + `<td data-col="sku" title="${escapeHTML(skuText)}">${skuHTML}</td>`
         + `<td data-col="tracking"><code>${escapeHTML(tracking)}</code></td>`
         + `<td data-col="invoice_id"><code>${escapeHTML(invoiceID)}</code></td>`
-        + `<td data-col="actions"><div class="actions"><button class="btn" onclick="adminViewOrderDetail(${it.id})">View</button>${runBtn}<button class="btn" onclick='adminOpenEditOrderStatus(${poJSON}, ${it.status})'>Edit</button></div></td>`;
+        + `<td data-col="actions"><div class="actions"><button class="btn" onclick="adminViewOrderDetail(${it.id})">View</button><button class="btn" onclick='adminCheckOneOrder(${poJSON})'>Check</button>${runBtn}<button class="btn" onclick='adminOpenEditOrderStatus(${poJSON}, ${it.status})'>Edit</button></div></td>`;
       tbody.appendChild(tr);
     }
     applyOrdersColumnVisibility();
@@ -585,6 +600,90 @@ async function adminExportOrders() {
     showToast("Export: OK");
   } catch (e) {
     showToast("Export: " + e.message);
+  }
+}
+
+function openJSONModal(title, meta, obj) {
+  const t = qs("orderDetailTitle");
+  const m = qs("orderDetailMeta");
+  const pre = qs("orderDetailText");
+  if (t) t.textContent = title || "JSON";
+  if (m) m.textContent = meta || "";
+  if (pre) pre.textContent = JSON.stringify(obj ?? null, null, 2);
+  openModal("orderDetailModal");
+}
+
+function applyOrdersCheckResponse(data, replaceAll) {
+  if (replaceAll) ordersCheckByPO = {};
+  const results = Array.isArray(data?.results) ? data.results : [];
+  for (const r of results) {
+    const po = String(r?.po_number || "").trim();
+    if (!po) continue;
+    ordersCheckByPO[po] = r;
+  }
+  ordersCheckMissingLocal = Array.isArray(data?.missing_local) ? data.missing_local : [];
+  let okN = 0;
+  let failN = 0;
+  for (const r of results) {
+    if (r && r.ok) okN += 1;
+    else failN += 1;
+  }
+  return { ok: okN, fail: failN, total: results.length };
+}
+
+function adminOpenCheckDetail(poNumber) {
+  const po = String(poNumber || "").trim();
+  if (!po) return showToast("missing po_number");
+  const r = ordersCheckByPO ? ordersCheckByPO[po] : null;
+  if (!r) return showToast("Check result not found (try Check again)");
+  openJSONModal("Order Check Result", `po_number=${po}`, r);
+}
+
+function adminOpenCheckMissingLocal() {
+  const arr = Array.isArray(ordersCheckMissingLocal) ? ordersCheckMissingLocal : [];
+  openJSONModal("Check: Missing Local Records", `count=${arr.length}`, arr);
+}
+
+async function adminCheckOrdersRange() {
+  try {
+    const f = ordersFilter();
+    const start = f.start ? parseInt(f.start, 10) : 0;
+    const end = f.end ? parseInt(f.end, 10) : 0;
+    if (!Number.isFinite(start) || !Number.isFinite(end) || start <= 0 || end <= 0 || end <= start) {
+      return showToast("Check Range: please set valid start/end datetime");
+    }
+    const data = await apiJSON("POST", "/admin/api/dsco_order_sync/check", { start, end });
+    const stat = applyOrdersCheckResponse(data, true);
+    const missN = Array.isArray(data?.missing_local) ? data.missing_local.length : 0;
+    showToast(`Check Range: OK=${stat.ok}, FAIL=${stat.fail}, total=${stat.total}, missing_local=${missN}`, "ok");
+    await adminLoadOrders(ordersOffset);
+    if (missN > 0) {
+      adminOpenCheckMissingLocal();
+    }
+  } catch (e) {
+    showToast("Check Range: " + e.message);
+  }
+}
+
+async function adminCheckOneOrder(poNumber) {
+  const po = String(poNumber || "").trim();
+  if (!po) return showToast("missing po_number");
+  try {
+    const data = await apiJSON("POST", "/admin/api/dsco_order_sync/check", { po_number: po });
+    const stat = applyOrdersCheckResponse(data, false);
+    await adminLoadOrders(ordersOffset);
+    if (stat.total === 0) {
+      showToast("Check: no result (status=1 skipped or order not found)");
+      return;
+    }
+    const r = ordersCheckByPO[po];
+    if (r && r.ok) {
+      showToast("Check: OK", "ok");
+    } else {
+      showToast("Check: FAIL (" + (r?.code || "") + ")", "error");
+    }
+  } catch (e) {
+    showToast("Check: " + e.message);
   }
 }
 

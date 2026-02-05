@@ -38,6 +38,10 @@ type TaskContext struct {
 	Trigger Trigger
 	Size    int
 
+	// Report 用于“手动检查类任务”将结果回传给调用方（例如 Admin 前端）。
+	// 约定：仅在手动触发且调用方设置了 Report 时使用；定时任务/常规任务不使用。
+	Report func(v any)
+
 	// SnapshotRuntimeConfig 返回当前内存中的 runtime_config 快照（用于做轻量并发保护等）。
 	// 注意：Runner 在每次任务执行时会注入该函数。
 	SnapshotRuntimeConfig func(domain string) (runtimecfg.RuntimeConfig, bool)

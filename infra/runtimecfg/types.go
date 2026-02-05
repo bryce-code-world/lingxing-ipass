@@ -17,6 +17,7 @@ const (
 	JobSyncStock      JobName = "sync_stock"
 	JobPullSKUPair    JobName = "pull_sku_pair"
 	JobCleanupExports JobName = "cleanup_exports"
+	JobCheckOrders    JobName = "check_orders"
 )
 
 type RuntimeConfig struct {
