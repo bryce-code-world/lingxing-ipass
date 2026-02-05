@@ -339,3 +339,11 @@ func parseQtyFromMSKUToken(token string) int {
 	}
 	return q
 }
+
+func shouldSkipInvoiceBecauseAlreadyHasInvoiceID(onlyPONumber, existingInvoiceID string) bool {
+	// 手动指定 po_number（OnlyPONumber 非空）属于人工重试/验证场景：即使本地已有 invoice_id 也继续执行，不做幂等跳过。
+	if strings.TrimSpace(onlyPONumber) != "" {
+		return false
+	}
+	return strings.TrimSpace(existingInvoiceID) != ""
+}

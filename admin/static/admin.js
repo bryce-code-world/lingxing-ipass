@@ -621,12 +621,45 @@ function whFilter() {
   set("dsco_warehouse_sku", (qs("wDscoSku")?.value || "").trim());
   set("lingxing_warehouse_id", (qs("wLxWh")?.value || "").trim());
   set("lingxing_warehouse_sku", (qs("wLxSku")?.value || "").trim());
+  set("diff_range", (qs("wDiffRange")?.value || "").trim());
   set("status", (qs("wStatus")?.value || "").trim());
   const s = parseDateTimeLocal(qs("wStartDT")?.value || "");
   const e = parseDateTimeLocal(qs("wEndDT")?.value || "");
   if (s) set("start", String(zonedDateTimeToUnixSec(s, ADMIN_TZ)));
   if (e) set("end", String(zonedDateTimeToUnixSec(e, ADMIN_TZ)));
   return f;
+}
+
+function fillSelectOptions(el, values) {
+  if (!el) return;
+  const keepValue = (el.value || "").trim();
+  const placeholderText = el.querySelector("option")?.textContent || "";
+  el.innerHTML = "";
+
+  const opt0 = document.createElement("option");
+  opt0.value = "";
+  opt0.textContent = placeholderText;
+  el.appendChild(opt0);
+
+  for (const v of (values || [])) {
+    const s = String(v || "").trim();
+    if (!s) continue;
+    const opt = document.createElement("option");
+    opt.value = s;
+    opt.textContent = s;
+    el.appendChild(opt);
+  }
+  if (keepValue) el.value = keepValue;
+}
+
+async function adminLoadWarehouseOptions() {
+  try {
+    const data = await apiJSON("GET", "/admin/api/dsco_warehouse_sync/options");
+    fillSelectOptions(qs("wDscoWh"), data.dsco_warehouse_ids || []);
+    fillSelectOptions(qs("wLxWh"), data.lingxing_warehouse_ids || []);
+  } catch (e) {
+    showToast("Warehouse options: " + e.message);
+  }
 }
 
 async function adminLoadWarehouses(offset) {
@@ -644,7 +677,7 @@ async function adminLoadWarehouses(offset) {
     tbody.innerHTML = "";
     for (const it of (data.items || [])) {
       const tr = document.createElement("tr");
-      tr.innerHTML = `<td>${it.id}</td><td title="${it.sync_time}">${fmtUnixSec(it.sync_time)}</td><td>${it.dsco_warehouse_id}</td><td>${it.dsco_warehouse_sku}</td><td>${it.dsco_warehouse_num}</td><td>${it.lingxing_warehouse_id}</td><td>${it.lingxing_warehouse_sku}</td><td>${it.lingxing_warehouse_num}</td><td>${it.status}</td><td>${it.reason}</td>`;
+      tr.innerHTML = `<td>${it.id}</td><td title="${it.sync_time}">${fmtUnixSec(it.sync_time)}</td><td>${it.dsco_warehouse_id}</td><td>${it.dsco_warehouse_sku}</td><td>${it.dsco_warehouse_num}</td><td>${it.lingxing_warehouse_id}</td><td>${it.lingxing_warehouse_sku}</td><td>${it.lingxing_warehouse_num}</td><td>${it.diff}</td><td>${it.status}</td><td>${it.reason}</td>`;
       tbody.appendChild(tr);
     }
   } catch (e) {
@@ -668,6 +701,7 @@ async function adminExportWarehouses() {
     if (f.dsco_warehouse_sku) body.dscoWarehouseSKU = f.dsco_warehouse_sku;
     if (f.lingxing_warehouse_id) body.lingXingWarehouseID = f.lingxing_warehouse_id;
     if (f.lingxing_warehouse_sku) body.lingXingWarehouseSKU = f.lingxing_warehouse_sku;
+    if (f.diff_range) body.diffRange = f.diff_range;
     await apiDownload("/admin/api/export/dsco_warehouse_sync", body, "dsco_warehouse_sync.csv");
     showToast("Export: OK");
   } catch (e) {
@@ -679,5 +713,8 @@ document.addEventListener("DOMContentLoaded", () => {
   setTZLabel();
   renderTimestamps();
   if (qs("ordersTable")) adminLoadOrders(0);
-  if (qs("whTable")) adminLoadWarehouses(0);
+  if (qs("whTable")) {
+    adminLoadWarehouseOptions();
+    adminLoadWarehouses(0);
+  }
 });

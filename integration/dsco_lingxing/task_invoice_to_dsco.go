@@ -3,7 +3,9 @@ package dsco_lingxing
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"math"
+	"sort"
 	"strings"
 	"time"
 
@@ -132,19 +134,56 @@ func (d *Domain) InvoiceToDSCO(ctx integration.TaskContext) (retErr error) {
 			continue
 		}
 
-		// 0) 幂等：已写入 dsco_invoice_id 的订单视为已回传过发票，直接跳过。
-		if strings.TrimSpace(row.DSCOInvoiceID) != "" {
-			skip++
-			logger.Info(taskCtx, "order done",
+		// 0) 幂等：
+		// - 默认：已写入 dsco_invoice_id 的订单视为已回传过发票，直接跳过。
+		// - 手动指定 po_number（OnlyPONumber 非空）时属于人工重试/验证：即使本地已有 invoice_id 也继续执行。
+		// - 兜底：若本地已有 invoice_id，但 DSCO 侧实际查不到该 invoice，则不跳过（避免“本地标记成功但 DSCO 无数据”导致永久卡死）。
+		if shouldSkipInvoiceBecauseAlreadyHasInvoiceID(ctx.OnlyPONumber, row.DSCOInvoiceID) {
+			exists, exErr := dscoInvoiceExists(taskCtx, dscoCli, row.DSCOInvoiceID)
+			if exErr != nil {
+				logger.Warn(taskCtx, "order note",
+					append(base,
+						"task", "invoice_to_dsco",
+						"po_number", po,
+						"reason", "check_dsco_invoice_exists_failed_before_skip",
+						"invoice_id", row.DSCOInvoiceID,
+						"err", exErr,
+					)...,
+				)
+				// 查询失败时继续执行回传逻辑：避免本地标记与 DSCO 真实状态不一致。
+			} else if !exists {
+				logger.Warn(taskCtx, "order note",
+					append(base,
+						"task", "invoice_to_dsco",
+						"po_number", po,
+						"reason", "local_has_invoice_id_but_dsco_missing",
+						"invoice_id", row.DSCOInvoiceID,
+					)...,
+				)
+				// DSCO 侧查不到，继续执行回传逻辑。
+			} else {
+				skip++
+				logger.Info(taskCtx, "order done",
+					append(base,
+						"task", "invoice_to_dsco",
+						"po_number", po,
+						"result", "skip",
+						"reason", "already_has_invoice_id",
+						"invoice_id", row.DSCOInvoiceID,
+					)...,
+				)
+				continue
+			}
+		}
+		if strings.TrimSpace(ctx.OnlyPONumber) != "" && strings.TrimSpace(row.DSCOInvoiceID) != "" {
+			logger.Info(taskCtx, "order note",
 				append(base,
 					"task", "invoice_to_dsco",
 					"po_number", po,
-					"result", "skip",
-					"reason", "already_has_invoice_id",
+					"reason", "manual_force_with_existing_invoice_id",
 					"invoice_id", row.DSCOInvoiceID,
 				)...,
 			)
-			continue
 		}
 
 		if multiBan {
@@ -447,21 +486,120 @@ func (d *Domain) InvoiceToDSCO(ctx integration.TaskContext) (retErr error) {
 		return nil
 	}
 	// 11) 调用 DSCO invoice 批量接口
-	_, err = dscoCli.Invoice.CreateSmallBatch(taskCtx, invs)
+	resp, raw, err := dscoCli.Invoice.CreateSmallBatchWithRawBody(taskCtx, invs)
 	if err != nil {
 		retErr = err
 		logger.Error(taskCtx, "dsco invoice createSmallBatch failed",
 			append(base,
 				"task", "invoice_to_dsco",
 				"batch", integration.JSONForLog(invs),
+				"resp_raw", raw,
 				"err", err,
 			)...,
 		)
 		return retErr
 	}
-	// 12) 回传成功：写回 invoiceId，并推进到 status=5
+
+	logger.Info(taskCtx, "dsco invoice createSmallBatch ok",
+		append(base,
+			"task", "invoice_to_dsco",
+			"resp", integration.JSONForLog(resp),
+			"resp_raw", raw,
+		)...,
+	)
+
+	// 12) 校验 DSCO 侧是否真正落库（CreateSmallBatch 为异步接口；仅 HTTP 成功不代表每条都成功）。
+	// - 优先：按 requestId 查询 change log，读取每条 invoice 的 success/failure 结果。
+	// - 兜底：按 invoiceId 查询 /invoice，确认可见后再更新本地状态。
+	verifyByInvoiceID := make(map[string]bool, len(toUpdate))
+	verifyMsgByInvoiceID := make(map[string]any, len(toUpdate))
+
+	remaining := make(map[string]struct{}, len(toUpdate))
 	for _, it := range toUpdate {
-		if err := d.orderStore.UpdateStatusAndFields(taskCtx, it.po, 5, "", it.invoiceID); err != nil {
+		remaining[it.invoiceID] = struct{}{}
+	}
+
+	if resp != nil && strings.TrimSpace(resp.RequestID) != "" {
+		m, msg, completed := pollDSCOInvoiceChangeLog(taskCtx, dscoCli, resp.RequestID, remaining, 60*time.Second, 3*time.Second)
+		for k, v := range m {
+			verifyByInvoiceID[k] = v
+			if mm, ok := msg[k]; ok {
+				verifyMsgByInvoiceID[k] = mm
+			}
+			delete(remaining, k)
+		}
+
+		var confirmedOK int
+		var confirmedFail int
+		for _, ok := range m {
+			if ok {
+				confirmedOK++
+			} else {
+				confirmedFail++
+			}
+		}
+		logger.Info(taskCtx, "dsco invoice verify by requestId",
+			append(base,
+				"task", "invoice_to_dsco",
+				"request_id", resp.RequestID,
+				"completed", completed,
+				"confirmed_ok", confirmedOK,
+				"confirmed_fail", confirmedFail,
+				"remaining_count", len(remaining),
+				"remaining_invoice_ids", strings.Join(mapKeysToSortedSlice(remaining), ","),
+			)...,
+		)
+
+		if !completed {
+			logger.Warn(taskCtx, "dsco invoice verify note",
+				append(base,
+					"task", "invoice_to_dsco",
+					"reason", "dsco_invoice_change_log_not_completed_in_time",
+					"request_id", resp.RequestID,
+				)...,
+			)
+		}
+	}
+
+	// 兜底：对未拿到明确结果的 invoiceId，再做一次可见性查询（避免 change log 延迟）。
+	for invID := range remaining {
+		ok, exErr := waitForDSCOInvoiceVisible(taskCtx, dscoCli, invID, 12, 2500*time.Millisecond)
+		if exErr != nil {
+			verifyMsgByInvoiceID[invID] = exErr.Error()
+		}
+		verifyByInvoiceID[invID] = ok
+	}
+
+	// 13) 仅在 DSCO 侧确认成功后，才写回 invoiceId 并推进到 status=5；否则保留 status=4 以便下次重试。
+	for _, it := range toUpdate {
+		ok := verifyByInvoiceID[it.invoiceID]
+		if !ok {
+			fail++
+			// 注意：Warn 级别可能写入独立文件，这里同时打一条 Info，确保 info.log 可见失败原因。
+			logger.Info(taskCtx, "order done",
+				append(base,
+					"task", "invoice_to_dsco",
+					"po_number", it.po,
+					"result", "fail",
+					"reason", "dsco_invoice_not_confirmed",
+					"invoice_id", it.invoiceID,
+					"verify_detail", verifyMsgByInvoiceID[it.invoiceID],
+				)...,
+			)
+			logger.Warn(taskCtx, "order done",
+				append(base,
+					"task", "invoice_to_dsco",
+					"po_number", it.po,
+					"result", "fail",
+					"reason", "dsco_invoice_not_confirmed",
+					"invoice_id", it.invoiceID,
+					"verify_detail", verifyMsgByInvoiceID[it.invoiceID],
+				)...,
+			)
+			continue
+		}
+
+		if err := d.orderStore.UpdateStatusAndInvoiceID(taskCtx, it.po, 5, it.invoiceID); err != nil {
 			fail++
 			logger.Warn(taskCtx, "order done",
 				append(base,
@@ -487,5 +625,140 @@ func (d *Domain) InvoiceToDSCO(ctx integration.TaskContext) (retErr error) {
 			)...,
 		)
 	}
+
+	// 手动单号回传：若未确认成功，返回错误让 Admin 端明确感知失败。
+	if strings.TrimSpace(ctx.OnlyPONumber) != "" && okCount == 0 && fail > 0 {
+		return errors.New("dsco invoice not confirmed")
+	}
 	return nil
+}
+
+const dscoInvoiceGetKeyInvoiceID = "invoiceId"
+
+func dscoInvoiceExists(ctx context.Context, cli *dsco.Client, invoiceID string) (bool, error) {
+	invoiceID = strings.TrimSpace(invoiceID)
+	if cli == nil || invoiceID == "" {
+		return false, nil
+	}
+	out, err := cli.Invoice.GetByID(ctx, dsco.InvoiceGetQuery{Key: dscoInvoiceGetKeyInvoiceID, Value: invoiceID})
+	if err != nil {
+		return false, err
+	}
+	return out != nil && len(out.Invoices) > 0, nil
+}
+
+func waitForDSCOInvoiceVisible(ctx context.Context, cli *dsco.Client, invoiceID string, attempts int, delay time.Duration) (bool, error) {
+	if attempts <= 0 {
+		attempts = 1
+	}
+	if delay <= 0 {
+		delay = 500 * time.Millisecond
+	}
+	var lastErr error
+	for i := 0; i < attempts; i++ {
+		exists, err := dscoInvoiceExists(ctx, cli, invoiceID)
+		if err == nil && exists {
+			return true, nil
+		}
+		if err != nil {
+			lastErr = err
+		}
+		if i < attempts-1 {
+			time.Sleep(delay)
+		}
+	}
+	return false, lastErr
+}
+
+func pollDSCOInvoiceChangeLog(
+	ctx context.Context,
+	cli *dsco.Client,
+	requestID string,
+	want map[string]struct{},
+	maxWait time.Duration,
+	interval time.Duration,
+) (map[string]bool, map[string]any, bool) {
+	requestID = strings.TrimSpace(requestID)
+	if cli == nil || requestID == "" || len(want) == 0 {
+		return map[string]bool{}, map[string]any{}, true
+	}
+	if maxWait <= 0 {
+		maxWait = 10 * time.Second
+	}
+	if interval <= 0 {
+		interval = 1 * time.Second
+	}
+
+	deadline := time.Now().Add(maxWait)
+	result := make(map[string]bool, len(want))
+	detail := make(map[string]any, len(want))
+
+	for {
+		out, err := cli.Invoice.GetChangeLog(ctx, dsco.InvoiceChangeLogQuery{
+			RequestID: requestID,
+			Status:    "success_or_failure",
+		})
+		if err == nil && out != nil {
+			for _, l := range out.Logs {
+				invID := strings.TrimSpace(l.Payload.InvoiceID)
+				if invID == "" {
+					continue
+				}
+				if _, ok := want[invID]; !ok {
+					continue
+				}
+				st := strings.ToLower(strings.TrimSpace(l.Status))
+				switch st {
+				case "success":
+					result[invID] = true
+				case "failure":
+					result[invID] = false
+					// 失败时记录完整变更日志，便于排查 DSCO 返回的细节信息（例如 processId / requestMethodDetail 等）。
+					detail[invID] = l
+				default:
+					// pending/unknown：不写入结果，等待下一轮
+				}
+			}
+			// 若 change log 已完成，且本轮已经看到了需要的结果，则结束。
+			if strings.EqualFold(strings.TrimSpace(out.Status), "COMPLETED") {
+				return result, detail, true
+			}
+			// 若已拿到所有需要的结果（success/failure），也可提前结束。
+			allDone := true
+			for invID := range want {
+				if _, ok := result[invID]; !ok {
+					allDone = false
+					break
+				}
+			}
+			if allDone {
+				return result, detail, true
+			}
+		}
+
+		if time.Now().After(deadline) {
+			return result, detail, false
+		}
+		time.Sleep(interval)
+	}
+}
+
+func mapKeysToSortedSlice(m map[string]struct{}) []string {
+	if len(m) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		s := strings.TrimSpace(k)
+		if s == "" {
+			continue
+		}
+		keys = append(keys, s)
+	}
+	sort.Strings(keys)
+	const maxKeys = 20
+	if len(keys) > maxKeys {
+		keys = append(keys[:maxKeys], "...(truncated)")
+	}
+	return keys
 }

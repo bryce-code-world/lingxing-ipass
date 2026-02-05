@@ -34,6 +34,33 @@ func normalizeTrackingJoined(values []string) string {
 	return strings.Join(uniqueNonEmptyStrings(tokens), ",")
 }
 
+func parseTrackingSet(raw string) map[string]struct{} {
+	normalized := normalizeTrackingJoined([]string{raw})
+	if normalized == "" {
+		return map[string]struct{}{}
+	}
+	out := make(map[string]struct{}, 8)
+	for _, t := range strings.Split(normalized, ",") {
+		if s := strings.TrimSpace(t); s != "" {
+			out[s] = struct{}{}
+		}
+	}
+	return out
+}
+
+func joinTrackingSet(set map[string]struct{}) string {
+	if len(set) == 0 {
+		return ""
+	}
+	items := make([]string, 0, len(set))
+	for k := range set {
+		if s := strings.TrimSpace(k); s != "" {
+			items = append(items, s)
+		}
+	}
+	return normalizeTrackingJoined(items)
+}
+
 // ShipToDSCO 将领星侧的发货信息回传给 DSCO（Shipment CreateSmallBatch）。
 //
 // 状态机（一期口径）：
@@ -85,11 +112,32 @@ func (d *Domain) ShipToDSCO(ctx integration.TaskContext) (retErr error) {
 		logger.Info(taskCtx, "task end", append(fields, "result", "ok")...)
 	}()
 
-	// 1) 取待回传发货（status=3）
+	// 1) 取待回传发货（status=3）。
+	// 手动指定 po_number 时，允许取出该单据并用于补偿回传（即使其 status 已被错误推进到 4）。
 	var items []store.DSCOOrderSyncRow
 	var err error
 	if strings.TrimSpace(ctx.OnlyPONumber) != "" {
-		items, err = d.orderStore.FindByStatusAndPONumber(taskCtx, 3, ctx.OnlyPONumber)
+		row, ok, gerr := d.orderStore.GetByPONumber(taskCtx, ctx.OnlyPONumber)
+		if gerr != nil {
+			retErr = gerr
+			return retErr
+		}
+		if !ok {
+			return nil
+		}
+		if row.Status < 3 {
+			logger.Info(taskCtx, "order done",
+				append(base,
+					"task", "ship_to_dsco",
+					"po_number", strings.TrimSpace(ctx.OnlyPONumber),
+					"result", "skip",
+					"reason", "status_not_allowed_for_ship",
+					"status", row.Status,
+				)...,
+			)
+			return nil
+		}
+		items = []store.DSCOOrderSyncRow{row}
 	} else {
 		items, err = d.orderStore.FindByStatus(taskCtx, 3, ctx.Size)
 	}
@@ -151,11 +199,13 @@ func (d *Domain) ShipToDSCO(ctx integration.TaskContext) (retErr error) {
 	var toUpdate []struct {
 		po       string
 		tracking string
+		status   int16
 	}
 
 	for _, row := range items {
 		po := strings.TrimSpace(row.PONumber)
-		existingTracking := strings.TrimSpace(row.ShippedTrackingNo)
+		existingTracking := normalizeTrackingJoined([]string{row.ShippedTrackingNo})
+		existingTrackingSet := parseTrackingSet(existingTracking)
 		if po == "" {
 			skip++
 			logger.Info(taskCtx, "order done",
@@ -172,49 +222,33 @@ func (d *Domain) ShipToDSCO(ctx integration.TaskContext) (retErr error) {
 		if o, ok := dscoByPO[po]; ok {
 			switch strings.TrimSpace(o.DscoStatus) {
 			case "shipped", "completed":
-				trackingFromDSCO := ""
-				if len(o.Packages) > 0 {
-					trackingFromDSCO = normalizeTrackingJoined([]string{o.Packages[0].TrackingNumber})
+				// 重要：DSCO 侧订单状态变为 shipped 并不一定代表“所有行都可开票/可回传发票”。
+				// 例如：同一 PO 在领星拆单，先回传了一部分 shipment，DSCO 仍可能将订单标为 shipped；
+				// 若此处直接跳过，会导致缺失的 tracking/行项目无法补回，后续 invoice 会因为 available-to-invoice=0 失败。
+				var pkgTrackings []string
+				for _, p := range o.Packages {
+					if s := strings.TrimSpace(p.TrackingNumber); s != "" {
+						pkgTrackings = append(pkgTrackings, s)
+					}
 				}
-				var uerr error
-				if existingTracking == "" && trackingFromDSCO != "" {
-					uerr = d.orderStore.UpdateStatusAndTrackingNo(taskCtx, po, 4, trackingFromDSCO)
-				} else {
-					uerr = d.orderStore.UpdateStatus(taskCtx, po, 4)
+				trackingFromDSCO := normalizeTrackingJoined(pkgTrackings)
+				if trackingFromDSCO != "" {
+					for t := range parseTrackingSet(trackingFromDSCO) {
+						existingTrackingSet[t] = struct{}{}
+					}
+					existingTracking = joinTrackingSet(existingTrackingSet)
 				}
-				if uerr != nil {
-					fail++
-					logger.Warn(taskCtx, "order done",
-						append(base,
-							"task", "ship_to_dsco",
-							"po_number", po,
-							"result", "fail",
-							"reason", "update_local_status_failed_for_dsco_already_shipped",
-							"dsco_status", strings.TrimSpace(o.DscoStatus),
-							"dsco_raw", integration.JSONForLog(o),
-							"tracking_before", existingTracking,
-							"tracking_from_dsco", trackingFromDSCO,
-							"err", uerr,
-						)...,
-					)
-					continue
-				}
-				skip++
-				advanced++
-				logger.Info(taskCtx, "order done",
+				logger.Warn(taskCtx, "order note",
 					append(base,
 						"task", "ship_to_dsco",
 						"po_number", po,
-						"result", "skip",
-						"reason", "dsco_already_shipped_or_completed",
+						"reason", "dsco_status_shipped_but_continue",
 						"dsco_status", strings.TrimSpace(o.DscoStatus),
-						"dsco_raw", integration.JSONForLog(o),
-						"tracking_before", existingTracking,
 						"tracking_from_dsco", trackingFromDSCO,
-						"new_status", 4,
+						"tracking_before", strings.TrimSpace(row.ShippedTrackingNo),
 					)...,
 				)
-				continue
+				// continue: still try to补回缺失 shipment
 			case "shipment_pending":
 				// ok: continue
 			default:
@@ -431,10 +465,116 @@ func (d *Domain) ShipToDSCO(ctx integration.TaskContext) (retErr error) {
 			continue
 		}
 
+		// 7.1) “是否已全量发货”判断（以 DSCO 订单行数量为准）：
+		// - 只要有任一 partnerSku 的已发货数量 < DSCO 订单行期望数量，则认为未全量发货。
+		// - 未全量发货时允许先回传“部分 tracking”，但不推进本地状态到 4（避免后续 invoice 任务误触发）。
+		expectedQtyByPartner := map[string]int{}
+		for _, li := range dscoOrder.LineItems {
+			partner := ""
+			if li.PartnerSKU != nil && strings.TrimSpace(*li.PartnerSKU) != "" {
+				partner = strings.TrimSpace(*li.PartnerSKU)
+			} else if li.SKU != nil && strings.TrimSpace(*li.SKU) != "" {
+				partner = strings.TrimSpace(*li.SKU)
+			}
+			if partner == "" || li.Quantity <= 0 {
+				continue
+			}
+			expectedQtyByPartner[partner] += li.Quantity
+		}
+		shippedQtyByPartner := map[string]int{}
+		for _, agg := range shipAggByTracking {
+			for partner, it := range agg.items {
+				if it == nil || it.Quantity <= 0 {
+					continue
+				}
+				shippedQtyByPartner[partner] += it.Quantity
+			}
+		}
+		notReady := false
+		for partner, expected := range expectedQtyByPartner {
+			if expected <= 0 {
+				continue
+			}
+			if shippedQtyByPartner[partner] < expected {
+				notReady = true
+				break
+			}
+		}
+
+		// 7.2) 增量回传：只回传“尚未写入 shipped_tracking_no”的 tracking，避免重复回传导致 DSCO 侧 update/冲突。
+		shipAggToSend := map[string]*shipAgg{}
+		for tracking, agg := range shipAggByTracking {
+			if _, ok := existingTrackingSet[tracking]; ok {
+				continue
+			}
+			shipAggToSend[tracking] = agg
+		}
+		if len(shipAggToSend) == 0 {
+			if notReady {
+				skip++
+				logger.Info(taskCtx, "order done",
+					append(base,
+						"task", "ship_to_dsco",
+						"po_number", po,
+						"result", "skip",
+						"reason", "not_fully_shipped_no_new_tracking",
+						"expected_qty", integration.JSONForLog(expectedQtyByPartner),
+						"shipped_qty", integration.JSONForLog(shippedQtyByPartner),
+						"tracking_sent", existingTracking,
+						"wms_orders_raw", integration.JSONForLog(wmsOrders),
+					)...,
+				)
+				continue
+			}
+			// 已全量发货，但没有新增 tracking 需要回传：说明之前已经回传过，推进到 status=4 等待回传发票。
+			if existingTracking == "" {
+				skip++
+				logger.Info(taskCtx, "order done",
+					append(base,
+						"task", "ship_to_dsco",
+						"po_number", po,
+						"result", "skip",
+						"reason", "fully_shipped_but_no_tracking_sent",
+						"expected_qty", integration.JSONForLog(expectedQtyByPartner),
+						"shipped_qty", integration.JSONForLog(shippedQtyByPartner),
+						"wms_orders_raw", integration.JSONForLog(wmsOrders),
+					)...,
+				)
+				continue
+			}
+			if uerr := d.orderStore.UpdateStatus(taskCtx, po, 4); uerr != nil {
+				fail++
+				logger.Warn(taskCtx, "order done",
+					append(base,
+						"task", "ship_to_dsco",
+						"po_number", po,
+						"result", "fail",
+						"reason", "update_local_status_failed_for_fully_shipped_no_new_tracking",
+						"tracking", existingTracking,
+						"err", uerr,
+					)...,
+				)
+				continue
+			}
+			okCount++
+			advanced++
+			logger.Info(taskCtx, "order done",
+				append(base,
+					"task", "ship_to_dsco",
+					"po_number", po,
+					"result", "ok",
+					"reason", "fully_shipped_no_new_tracking_advance",
+					"tracking", existingTracking,
+					"new_status", 4,
+				)...,
+			)
+			continue
+		}
+
 		dscoWarehouseCode := getDSCOWarehouseCode(dscoOrder)
 		var shipments []dsco.ShipmentForUpdate
-		trackingList := make([]string, 0, len(shipAggByTracking))
-		for tracking, agg := range shipAggByTracking {
+		trackingList := make([]string, 0, len(shipAggToSend))
+		for tracking, agg := range shipAggToSend {
 			trackingList = append(trackingList, tracking)
 			var lineItems []dsco.ShipmentLineItemForUpdate
 			for _, it := range agg.items {
@@ -475,15 +615,29 @@ func (d *Domain) ShipToDSCO(ctx integration.TaskContext) (retErr error) {
 			Shipments: shipments,
 		}
 		batch = append(batch, ship)
+		for _, t := range trackingList {
+			if s := strings.TrimSpace(t); s != "" {
+				existingTrackingSet[s] = struct{}{}
+			}
+		}
+		nextStatus := int16(3)
+		if !notReady {
+			nextStatus = 4
+		}
 		toUpdate = append(toUpdate, struct {
 			po       string
 			tracking string
-		}{po: po, tracking: trackingJoined})
+			status   int16
+		}{po: po, tracking: joinTrackingSet(existingTrackingSet), status: nextStatus})
 		logger.Info(taskCtx, "order prepared",
 			append(base,
 				"task", "ship_to_dsco",
 				"po_number", po,
 				"tracking", trackingJoined,
+				"tracking_sent_before", existingTracking,
+				"not_fully_shipped", notReady,
+				"expected_qty", integration.JSONForLog(expectedQtyByPartner),
+				"shipped_qty", integration.JSONForLog(shippedQtyByPartner),
 				"ship_request", integration.JSONForLog(ship),
 				"wms_orders_raw", integration.JSONForLog(wmsOrders),
 			)...,
@@ -509,7 +663,7 @@ func (d *Domain) ShipToDSCO(ctx integration.TaskContext) (retErr error) {
 
 	// 11) 回传成功：写回 tracking，并推进到 status=4
 	for _, it := range toUpdate {
-		if err := d.orderStore.UpdateStatusAndFields(taskCtx, it.po, 4, it.tracking, ""); err != nil {
+		if err := d.orderStore.UpdateStatusAndTrackingNo(taskCtx, it.po, it.status, it.tracking); err != nil {
 			fail++
 			logger.Warn(taskCtx, "order done",
 				append(base,
@@ -518,6 +672,7 @@ func (d *Domain) ShipToDSCO(ctx integration.TaskContext) (retErr error) {
 					"result", "fail",
 					"reason", "update_local_status_failed_after_ship",
 					"tracking", it.tracking,
+					"new_status", it.status,
 					"err", err,
 				)...,
 			)
@@ -531,7 +686,7 @@ func (d *Domain) ShipToDSCO(ctx integration.TaskContext) (retErr error) {
 				"result", "ok",
 				"reason", "dsco_shipment_sent",
 				"tracking", it.tracking,
-				"new_status", 4,
+				"new_status", it.status,
 			)...,
 		)
 	}

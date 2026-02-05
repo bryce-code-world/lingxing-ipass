@@ -90,6 +90,7 @@ func (s *Server) registerRoutes() {
 	authed.PUT("/dsco_order_sync/status", s.apiUpdateOrderStatus)
 
 	authed.GET("/dsco_warehouse_sync/list", s.apiListWarehouseSync)
+	authed.GET("/dsco_warehouse_sync/options", s.apiWarehouseSyncOptions)
 
 	authed.POST("/export/dsco_order_sync", s.apiExportOrders)
 	authed.POST("/export/dsco_warehouse_sync", s.apiExportWarehouseSync)

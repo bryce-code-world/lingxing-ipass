@@ -39,6 +39,7 @@ type DSCOWarehouseSyncRow struct {
 	LingXingWarehouseID  string `gorm:"column:lingxing_warehouse_id"`
 	LingXingWarehouseSKU string `gorm:"column:lingxing_warehouse_sku"`
 	LingXingWarehouseNum int    `gorm:"column:lingxing_warehouse_num"`
+	Diff                 int    `gorm:"column:diff"`
 	Status               int16  `gorm:"column:status"`
 	Reason               string `gorm:"column:reason"`
 	CreatedAt            int64  `gorm:"column:created_at"`

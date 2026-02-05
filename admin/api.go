@@ -510,6 +510,7 @@ func (s *Server) apiListWarehouseSync(c *gin.Context) {
 		LingXingWarehouseID  string `json:"lingxing_warehouse_id"`
 		LingXingWarehouseSKU string `json:"lingxing_warehouse_sku"`
 		LingXingWarehouseNum int    `json:"lingxing_warehouse_num"`
+		Diff                 int    `json:"diff"`
 		Status               int16  `json:"status"`
 		Reason               string `json:"reason"`
 	}
@@ -522,6 +523,7 @@ func (s *Server) apiListWarehouseSync(c *gin.Context) {
 		LingXingWarehouseID:  c.Query("lingxing_warehouse_id"),
 		LingXingWarehouseSKU: c.Query("lingxing_warehouse_sku"),
 	}
+	applyWarehouseDiffRange(&filter, c.Query("diff_range"))
 	if v := c.Query("start"); v != "" {
 		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
 			filter.StartTime = &n
@@ -556,11 +558,29 @@ func (s *Server) apiListWarehouseSync(c *gin.Context) {
 			LingXingWarehouseID:  it.LingXingWarehouseID,
 			LingXingWarehouseSKU: it.LingXingWarehouseSKU,
 			LingXingWarehouseNum: it.LingXingWarehouseNum,
+			Diff:                 it.Diff,
 			Status:               it.Status,
 			Reason:               it.Reason,
 		})
 	}
 	ok(c, map[string]any{"items": out, "total": total})
+}
+
+func (s *Server) apiWarehouseSyncOptions(c *gin.Context) {
+	dscoIDs, err := s.warehouseStore.ListDistinctDSCOWarehouseIDs(c.Request.Context(), 200)
+	if err != nil {
+		fail(c, http.StatusInternalServerError, 500, err.Error())
+		return
+	}
+	lxIDs, err := s.warehouseStore.ListDistinctLingXingWarehouseIDs(c.Request.Context(), 200)
+	if err != nil {
+		fail(c, http.StatusInternalServerError, 500, err.Error())
+		return
+	}
+	ok(c, map[string]any{
+		"dsco_warehouse_ids":     dscoIDs,
+		"lingxing_warehouse_ids": lxIDs,
+	})
 }
 
 func (s *Server) apiExportOrders(c *gin.Context) {
@@ -626,8 +646,14 @@ func (s *Server) apiExportOrders(c *gin.Context) {
 }
 
 func (s *Server) apiExportWarehouseSync(c *gin.Context) {
-	var filter store.DSCOWarehouseSyncListFilter
-	_ = c.ShouldBindJSON(&filter)
+	type exportWarehouseBody struct {
+		store.DSCOWarehouseSyncListFilter
+		DiffRange string `json:"diffRange"`
+	}
+	var body exportWarehouseBody
+	_ = c.ShouldBindJSON(&body)
+	filter := body.DSCOWarehouseSyncListFilter
+	applyWarehouseDiffRange(&filter, body.DiffRange)
 	if filter.StartTime != nil && filter.EndTime != nil {
 		maxSec := int64(s.env.Admin.Export.MaxRangeDays) * 86400
 		if *filter.EndTime-*filter.StartTime > maxSec {
@@ -640,7 +666,7 @@ func (s *Server) apiExportWarehouseSync(c *gin.Context) {
 
 	dir := s.env.Admin.Export.Dir
 	finalName, err := writeCSVExportFile(dir, "dsco_warehouse_sync", func(w *csv.Writer) error {
-		if err := w.Write([]string{"id", "sync_time", "dsco_warehouse_id", "dsco_warehouse_sku", "dsco_warehouse_num", "lingxing_warehouse_id", "lingxing_warehouse_sku", "lingxing_warehouse_num", "status", "reason"}); err != nil {
+		if err := w.Write([]string{"id", "sync_time", "dsco_warehouse_id", "dsco_warehouse_sku", "dsco_warehouse_num", "lingxing_warehouse_id", "lingxing_warehouse_sku", "lingxing_warehouse_num", "diff", "status", "reason"}); err != nil {
 			return err
 		}
 		offset := 0
@@ -660,6 +686,7 @@ func (s *Server) apiExportWarehouseSync(c *gin.Context) {
 					it.LingXingWarehouseID,
 					it.LingXingWarehouseSKU,
 					strconv.Itoa(it.LingXingWarehouseNum),
+					strconv.Itoa(it.Diff),
 					strconv.FormatInt(int64(it.Status), 10),
 					it.Reason,
 				}); err != nil {
@@ -697,6 +724,36 @@ func parseInt(s string, def int) int {
 		return def
 	}
 	return n
+}
+
+func applyWarehouseDiffRange(f *store.DSCOWarehouseSyncListFilter, diffRange string) {
+	diffRange = strings.TrimSpace(diffRange)
+	if diffRange == "" || f == nil {
+		return
+	}
+	switch diffRange {
+	case "lt_-5":
+		v := -6
+		f.DiffMax = &v
+	case "neg_5_1":
+		min := -5
+		max := -1
+		f.DiffMin = &min
+		f.DiffMax = &max
+	case "eq_0":
+		v := 0
+		f.DiffEq = &v
+	case "pos_1_5":
+		min := 1
+		max := 5
+		f.DiffMin = &min
+		f.DiffMax = &max
+	case "gt_5":
+		v := 6
+		f.DiffMin = &v
+	default:
+		// ignore unknown
+	}
 }
 
 // Keep json import used (payload debug).

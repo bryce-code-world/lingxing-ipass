@@ -2,6 +2,7 @@ package dsco_boarding
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -141,4 +142,58 @@ func TestBoarding_Method2_SmallBatch_UpdateTo50(t *testing.T) {
 		t.Fatalf("UpdateSmallBatch: requestId 为空，resp=%+v", resp)
 	}
 	t.Logf("small batch accepted: status=%s requestId=%s", resp.Status, resp.RequestID)
+}
+
+// TestBoarding_Stream_PullAllInventory
+//
+// 目的：通过 Stream + sync operation 全量拉取 DSCO inventory（用于对账/排错/数据校验）。
+//
+// 说明：
+//   - 该测试会真实调用 DSCO API，并可能耗时较长；默认跳过。
+//   - 运行方式（PowerShell）：
+//     $env:DSCO_PULL_ALL="1"; go test -run TestBoarding_Stream_PullAllInventory -v ./test/dsco_boarding
+func TestBoarding_Stream_PullAllInventory(t *testing.T) {
+	cli := newClient(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Minute)
+	defer cancel()
+
+	const (
+		logEvery  = 200
+		maxSample = 1000
+	)
+
+	var (
+		total      int
+		sampleSKUs []string
+	)
+	fmt.Println("开始全量拉取 DSCO inventory（Stream + sync）...")
+	err := cli.Inventory.PullAll(ctx, dsco.InventoryFullPullOptions{
+		Description:          "lingxing-ipass boarding full pull inventory",
+		MaxEventsObjectCount: 1000,
+		PollInterval:         2 * time.Second,
+		IdleTimeout:          10 * time.Minute,
+		MaxDuration:          60 * time.Minute,
+	}, func(inv *dsco.ItemInventory) error {
+		if inv == nil {
+			return nil
+		}
+		total++
+		if inv.SKU != "" && len(sampleSKUs) < maxSample {
+			sampleSKUs = append(sampleSKUs, inv.SKU)
+		}
+		if logEvery > 0 && total%logEvery == 0 {
+			fmt.Println("已拉取：", total, "当前 SKU:", inv.SKU)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("PullAll: %v", err)
+	}
+
+	head := sampleSKUs
+	if len(head) > 20 {
+		head = head[:20]
+	}
+	t.Logf("pull all inventory done: total=%d sample_count=%d sample_head=%v", total, len(sampleSKUs), head)
 }

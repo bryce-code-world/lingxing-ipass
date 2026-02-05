@@ -3,10 +3,22 @@
   <h1 class="h1">DSCO Warehouse Sync</h1>
   <div class="card">
     <div class="row wrap filters">
-      <input class="input sm" id="wDscoWh" placeholder="dsco_warehouse_id" />
+      <select class="select sm" id="wDscoWh">
+        <option value="">dsco_warehouse_id</option>
+      </select>
       <input class="input sm" id="wDscoSku" placeholder="dsco_warehouse_sku" />
-      <input class="input sm" id="wLxWh" placeholder="lingxing_warehouse_id" />
+      <select class="select sm" id="wLxWh">
+        <option value="">lingxing_warehouse_id</option>
+      </select>
       <input class="input sm" id="wLxSku" placeholder="lingxing_warehouse_sku" />
+      <select class="select sm" id="wDiffRange">
+        <option value="">diff</option>
+        <option value="lt_-5">&lt;-5</option>
+        <option value="neg_5_1">-5~-1</option>
+        <option value="eq_0">0</option>
+        <option value="pos_1_5">1~5</option>
+        <option value="gt_5">&gt;5</option>
+      </select>
       <input class="input sm" id="wStatus" placeholder="status (1,2)" />
       <input class="input sm" id="wStartDT" type="datetime-local" />
       <input class="input sm" id="wEndDT" type="datetime-local" />
@@ -39,6 +51,7 @@
           <th>lx_wid</th>
           <th>lx_sku</th>
           <th>lx_num</th>
+          <th>diff</th>
           <th>status</th>
           <th>reason</th>
         </tr>

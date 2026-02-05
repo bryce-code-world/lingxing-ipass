@@ -89,6 +89,7 @@ CREATE TABLE IF NOT EXISTS dsco_warehouse_sync (
   lingxing_warehouse_id  text     NOT NULL DEFAULT '',
   lingxing_warehouse_sku text     NOT NULL DEFAULT '',
   lingxing_warehouse_num integer  NOT NULL DEFAULT 0,
+  diff                  integer  NOT NULL DEFAULT 0,
 
   status                 smallint NOT NULL,
   reason                 text     NOT NULL DEFAULT '',
@@ -108,14 +109,18 @@ CREATE INDEX IF NOT EXISTS idx_dsco_warehouse_sync_dsco_wh_sku_time
 CREATE INDEX IF NOT EXISTS idx_dsco_warehouse_sync_status_time
   ON dsco_warehouse_sync (status, sync_time DESC);
 
+CREATE INDEX IF NOT EXISTS idx_dsco_warehouse_sync_diff_time
+  ON dsco_warehouse_sync (diff, sync_time DESC);
+
 COMMENT ON TABLE dsco_warehouse_sync IS '库存同步日志（领星库存 → DSCO 库存回写的记录，用于查询与导出）';
 COMMENT ON COLUMN dsco_warehouse_sync.sync_time IS '同步时间（UTC 秒级时间戳）';
 COMMENT ON COLUMN dsco_warehouse_sync.dsco_warehouse_id IS 'DSCO 仓库编码（warehouseCode）';
 COMMENT ON COLUMN dsco_warehouse_sync.dsco_warehouse_sku IS 'DSCO SKU（partnerSku 或 sku；用于 DSCO 入参）';
-COMMENT ON COLUMN dsco_warehouse_sync.dsco_warehouse_num IS 'DSCO 数量（回写数量）';
+COMMENT ON COLUMN dsco_warehouse_sync.dsco_warehouse_num IS 'DSCO 数量（同步前读取的 DSCO 仓库库存数量）';
 COMMENT ON COLUMN dsco_warehouse_sync.lingxing_warehouse_id IS '领星仓库 WID';
 COMMENT ON COLUMN dsco_warehouse_sync.lingxing_warehouse_sku IS '领星 SKU';
 COMMENT ON COLUMN dsco_warehouse_sync.lingxing_warehouse_num IS '领星数量（可用库存）';
+COMMENT ON COLUMN dsco_warehouse_sync.diff IS '库存差值（领星 - DSCO）';
 COMMENT ON COLUMN dsco_warehouse_sync.status IS '同步状态：1成功 2失败';
 COMMENT ON COLUMN dsco_warehouse_sync.reason IS '失败原因（一期默认不写入，仅保留字段扩展位）';
 COMMENT ON COLUMN dsco_warehouse_sync.created_at IS '创建时间（UTC 秒级时间戳）';

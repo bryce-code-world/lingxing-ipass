@@ -41,6 +41,11 @@ type JobConfig struct {
 	// 当前用于：sync_stock（领星库存 -> DSCO inventory）是否实际回写 DSCO。
 	Sync bool `json:"sync,omitempty"`
 
+	// UseStream 为 true 时，优先使用 DSCO Stream + sync operation 拉取 inventory（全量/批量），
+	// 用于替代循环调用 GET /inventory（该接口不适合批量，且有严格限流）。
+	// 当前用于：sync_stock 对账读取 DSCO 当前库存数量。
+	UseStream bool `json:"use_stream,omitempty"`
+
 	// MultiBan 为 true 时，禁止处理“多行/多数量”的订单（多 SKU / 单 SKU 多数量）。
 	// 说明：
 	// - MultiBan=false：不禁止（默认），允许执行该类订单。
