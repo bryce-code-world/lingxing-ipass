@@ -1,0 +1,450 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "lingxing-ipass External API",
+    "version": "1.0.0",
+    "description": "对外开放 API（与 Admin UI/Admin API 代码实现独立）。统一响应 envelope：{ code, message, data }。鉴权：Authorization: Bearer {token}。"
+  },
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Inventory",
+      "description": "库存差异查询与回写触发"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "token"
+      }
+    },
+    "schemas": {
+      "Envelope": {
+        "type": "object",
+        "required": ["code", "message"],
+        "properties": {
+          "code": {
+            "type": "integer",
+            "format": "int32",
+            "description": "业务码；0 表示成功。"
+          },
+          "message": {
+            "type": "string",
+            "description": "错误或成功描述。"
+          },
+          "data": {
+            "description": "成功时返回的数据对象。",
+            "nullable": true
+          }
+        }
+      },
+      "ErrorEnvelope": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Envelope" }
+        ],
+        "example": { "code": 400, "message": "invalid params" }
+      },
+      "InventoryDiffItem": {
+        "type": "object",
+        "required": [
+          "sync_time",
+          "dsco_warehouse_id",
+          "dsco_sku",
+          "dsco_num",
+          "lingxing_wid",
+          "lingxing_sku",
+          "lingxing_num",
+          "diff",
+          "status"
+        ],
+        "properties": {
+          "sync_time": {
+            "type": "string",
+            "description": "UTC 格式化时间（YYYY-MM-DD HH:mm:ss）。",
+            "example": "2026-02-05 01:06:40"
+          },
+          "dsco_warehouse_id": {
+            "type": "string",
+            "description": "DSCO 仓库 ID（warehouse code）。"
+          },
+          "dsco_sku": {
+            "type": "string",
+            "description": "DSCO partnerSku 口径（与实现一致）。"
+          },
+          "dsco_num": {
+            "type": "integer",
+            "format": "int32",
+            "description": "DSCO 当前库存（对账读取值）。"
+          },
+          "lingxing_wid": {
+            "type": "string",
+            "description": "领星仓库 ID（WID）。"
+          },
+          "lingxing_sku": {
+            "type": "string",
+            "description": "领星 SKU。"
+          },
+          "lingxing_num": {
+            "type": "integer",
+            "format": "int32",
+            "description": "领星可用库存（ProductValidNum）。"
+          },
+          "diff": {
+            "type": "integer",
+            "format": "int32",
+            "description": "diff = lingxing_num - dsco_num。"
+          },
+          "status": {
+            "type": "integer",
+            "format": "int32",
+            "description": "记录状态（与表 dsco_warehouse_sync.status 一致）。"
+          },
+          "reason": {
+            "type": "string",
+            "description": "失败原因（可选）。"
+          }
+        }
+      },
+      "InventoryDiffData": {
+        "type": "object",
+        "required": ["date", "page", "size", "total", "items"],
+        "properties": {
+          "date": {
+            "type": "string",
+            "description": "UTC 日期（YYYY-MM-DD）。",
+            "example": "2026-02-05"
+          },
+          "page": {
+            "type": "integer",
+            "format": "int32",
+            "example": 1
+          },
+          "size": {
+            "type": "integer",
+            "format": "int32",
+            "example": 50
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "description": "去重后的记录总数（按 full key 取当日最新）。"
+          },
+          "items": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/InventoryDiffItem" }
+          }
+        }
+      },
+      "InventorySyncManualItem": {
+        "type": "object",
+        "required": ["dsco_wid", "dsco_sku", "qty"],
+        "properties": {
+          "dsco_wid": {
+            "type": "string",
+            "description": "DSCO 仓库 ID（warehouse code）。"
+          },
+          "dsco_sku": {
+            "type": "string",
+            "description": "DSCO partnerSku 口径。"
+          },
+          "qty": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0,
+            "description": "要写入 DSCO 的库存数量（>=0）。"
+          }
+        }
+      },
+      "InventorySyncRequest": {
+        "type": "object",
+        "description": "触发库存回写。若提供 items 则走 manual_items 模式；否则走 daily_pulled 模式（从 dsco_warehouse_sync 读取当日最新记录）。",
+        "properties": {
+          "dry_run": {
+            "type": "boolean",
+            "description": "true：不回写 DSCO；false：真实回写。",
+            "default": true
+          },
+          "date": {
+            "type": "string",
+            "description": "UTC 日期（YYYY-MM-DD）；为空默认当天 UTC。仅 daily_pulled 模式有效。",
+            "example": "2026-02-05"
+          },
+          "diff_only": {
+            "type": "boolean",
+            "description": "仅回写 diff!=0 的记录；默认 true。仅 daily_pulled 模式有效。",
+            "default": true
+          },
+          "dsco_wid": {
+            "type": "string",
+            "description": "限定 DSCO 仓库（可选）。仅 daily_pulled 模式有效。"
+          },
+          "lingxing_wid": {
+            "type": "string",
+            "description": "限定领星仓库（可选）。仅 daily_pulled 模式有效。"
+          },
+          "dsco_sku_list": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "限定 DSCO SKU 集合（可选）。仅 daily_pulled 模式有效。"
+          },
+          "lingxing_sku_list": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "限定领星 SKU 集合（可选）。仅 daily_pulled 模式有效。"
+          },
+          "items": {
+            "type": "array",
+            "description": "手动传入回写明细（最多 1000 条）。提供该字段即进入 manual_items 模式。",
+            "items": { "$ref": "#/components/schemas/InventorySyncManualItem" }
+          }
+        }
+      },
+      "InventorySyncResult": {
+        "type": "object",
+        "required": ["run_id", "job", "dry_run", "source", "keys", "max_keys"],
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "description": "本次执行 run_id（Runner 生成）。"
+          },
+          "job": {
+            "type": "string",
+            "example": "sync_stock"
+          },
+          "dry_run": {
+            "type": "boolean"
+          },
+          "source": {
+            "type": "string",
+            "description": "daily_pulled 或 manual_items。",
+            "example": "daily_pulled"
+          },
+          "keys": {
+            "type": "integer",
+            "format": "int32",
+            "description": "本次处理的（dsco_warehouse_id + dsco_sku）维度数量。"
+          },
+          "max_keys": {
+            "type": "integer",
+            "format": "int32",
+            "description": "当使用 daily_pulled 模式时的保护阈值。"
+          },
+          "dsco_request_ids": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "当 dry_run=false 时，DSCO 异步更新接口返回的 requestId 列表（用于后续通过 DSCO stream/change log 跟踪最终处理结果）。"
+          }
+        }
+      },
+      "EnvelopeInventoryDiffData": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Envelope" },
+          {
+            "type": "object",
+            "properties": {
+              "data": { "$ref": "#/components/schemas/InventoryDiffData" }
+            }
+          }
+        ]
+      },
+      "EnvelopeInventorySyncResult": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Envelope" },
+          {
+            "type": "object",
+            "properties": {
+              "data": { "$ref": "#/components/schemas/InventorySyncResult" }
+            }
+          }
+        ]
+      }
+    }
+  },
+  "security": [
+    { "bearerAuth": [] }
+  ],
+  "paths": {
+    "/api/v1/inventory/diff": {
+      "get": {
+        "tags": ["Inventory"],
+        "summary": "查询当日库存差异",
+        "description": "从表 dsco_warehouse_sync 查询当日数据，并按 full key（dsco_warehouse_id + dsco_sku + lingxing_wid + lingxing_sku）取当日最新记录返回。",
+        "security": [{ "bearerAuth": [] }],
+        "parameters": [
+          {
+            "name": "dsco_wid",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string" },
+            "description": "DSCO 仓库 ID（精准匹配）。"
+          },
+          {
+            "name": "dsco_sku",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string" },
+            "description": "DSCO SKU（精准匹配）。"
+          },
+          {
+            "name": "lingxing_wid",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string" },
+            "description": "领星仓库 WID（精准匹配）。"
+          },
+          {
+            "name": "lingxing_sku",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string" },
+            "description": "领星 SKU（精准匹配）。"
+          },
+          {
+            "name": "date",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string", "example": "2026-02-05" },
+            "description": "UTC 日期（YYYY-MM-DD）；为空默认当天 UTC。"
+          },
+          {
+            "name": "diff_only",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "boolean", "default": false },
+            "description": "true：仅返回 diff!=0 的记录。"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "format": "int32", "default": 1 },
+            "description": "页码（默认 1）。"
+          },
+          {
+            "name": "size",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "format": "int32", "default": 50, "maximum": 500 },
+            "description": "分页大小（默认 50，最大 500）。"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/EnvelopeInventoryDiffData" }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized（缺少或格式非法 Authorization）",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } }
+          },
+          "403": {
+            "description": "Forbidden（token 不匹配）",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } }
+          },
+          "400": {
+            "description": "Bad Request（参数错误）",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } }
+          }
+        }
+      }
+    },
+    "/api/v1/inventory/sync": {
+      "post": {
+        "tags": ["Inventory"],
+        "summary": "触发库存回写（领星 -> DSCO）",
+        "description": "通过 runner 手动触发 sync_stock，并使用 override：dry_run 控制是否真实回写。支持 daily_pulled（从 dsco_warehouse_sync 当日最新记录选数）与 manual_items（调用方传入）。",
+        "security": [{ "bearerAuth": [] }],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/InventorySyncRequest" },
+              "examples": {
+                "dryRun": {
+                  "summary": "Dry run",
+                  "value": { "dry_run": true }
+                },
+                "dailyPulled": {
+                  "summary": "Daily pulled (default)",
+                  "value": {
+                    "date": "2026-02-05",
+                    "dry_run": false,
+                    "diff_only": true,
+                    "dsco_wid": "YQN-CA2",
+                    "dsco_sku_list": ["FF002PD-DGN03", "FF002PD-DGN02"]
+                  }
+                },
+                "manualItems": {
+                  "summary": "Manual items",
+                  "value": {
+                    "dry_run": false,
+                    "items": [
+                      { "dsco_wid": "YQN-CA2", "dsco_sku": "FF002PD-DGN03", "qty": 12 },
+                      { "dsco_wid": "YQN-CA2", "dsco_sku": "FF002PD-DGN02", "qty": 8 }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/EnvelopeInventorySyncResult" }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized（缺少或格式非法 Authorization）",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } }
+          },
+          "403": {
+            "description": "Forbidden（token 不匹配）",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } }
+          },
+          "400": {
+            "description": "Bad Request（参数错误或超出保护阈值）",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } }
+          },
+          "404": {
+            "description": "Not Found（job 不存在）",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } }
+          },
+          "409": {
+            "description": "Conflict（任务正在运行）",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } }
+          },
+          "503": {
+            "description": "Service Unavailable（runtime config 未加载等）",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorEnvelope" } } }
+          }
+        }
+      }
+    }
+  }
+}

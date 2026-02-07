@@ -41,6 +41,15 @@ func applyEnvOverride(cfg *EnvConfig) {
 		cfg.Base.Env = v
 	}
 
+	if v := os.Getenv("IPASS_API_ENABLE"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			cfg.API.Enable = b
+		}
+	}
+	if v := os.Getenv("IPASS_API_TOKEN"); v != "" {
+		cfg.API.Token = v
+	}
+
 	if v := os.Getenv("IPASS_ADMIN_PASSWORD"); v != "" {
 		cfg.Admin.Password = v
 	}
@@ -119,6 +128,10 @@ func ValidateEnv(cfg EnvConfig) error {
 	}
 	if cfg.Integration.LingXing.PlatformCode == 0 {
 		return errors.New("integration.lingxing.platform_code 不能为空/必须为正整数")
+	}
+
+	if cfg.API.Enable && strings.TrimSpace(cfg.API.Token) == "" {
+		return errors.New("api.enable=true 时 api.token 不能为空")
 	}
 
 	// integration.*.base_url 允许为空（SDK 有默认 BaseURL）

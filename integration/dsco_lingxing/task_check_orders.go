@@ -21,11 +21,11 @@ type dscoOrderBrief struct {
 	DscoStatus       string   `json:"dsco_status,omitempty"`
 	CreatedDate      string   `json:"created_date,omitempty"`
 	PackageTrackings []string `json:"package_trackings,omitempty"`
-	LineItems      []struct {
-		DscoItemID  string `json:"dsco_item_id,omitempty"`
-		PartnerSKU  string `json:"partner_sku,omitempty"`
-		LineNumber  int    `json:"line_number,omitempty"`
-		Quantity    int    `json:"quantity,omitempty"`
+	LineItems        []struct {
+		DscoItemID string `json:"dsco_item_id,omitempty"`
+		PartnerSKU string `json:"partner_sku,omitempty"`
+		LineNumber int    `json:"line_number,omitempty"`
+		Quantity   int    `json:"quantity,omitempty"`
 	} `json:"line_items,omitempty"`
 }
 
@@ -43,7 +43,7 @@ type dscoInvoiceBrief struct {
 type checkDetail struct {
 	Local store.DSCOOrderSyncRow `json:"local"`
 
-	DSCOOrder   *dscoOrderBrief    `json:"dsco_order,omitempty"`
+	DSCOOrder    *dscoOrderBrief    `json:"dsco_order,omitempty"`
 	DSCOInvoices []dscoInvoiceBrief `json:"dsco_invoices,omitempty"`
 
 	LingXingOrderFound bool `json:"lingxing_order_found,omitempty"`
@@ -205,7 +205,7 @@ func (d *Domain) CheckOrders(ctx integration.TaskContext) (retErr error) {
 			if !hasDSCO {
 				failN++
 				results = append(results, integration.OrderCheckResult{
-					PONumber:     po,
+					PONumber:    po,
 					OK:          false,
 					Code:        "order_not_found",
 					Message:     "order not found in DSCO and local store",
@@ -230,7 +230,7 @@ func (d *Domain) CheckOrders(ctx integration.TaskContext) (retErr error) {
 				br = &v
 			}
 			results = append(results, integration.OrderCheckResult{
-				PONumber:     po,
+				PONumber:    po,
 				OK:          false,
 				Code:        "missing_local_record",
 				Message:     "DSCO order exists but local record missing",
@@ -253,7 +253,7 @@ func (d *Domain) CheckOrders(ctx integration.TaskContext) (retErr error) {
 		if !hasDSCO {
 			failN++
 			results = append(results, integration.OrderCheckResult{
-				PONumber:     po,
+				PONumber:    po,
 				OK:          false,
 				Code:        "dsco_order_not_found",
 				Message:     "local record exists but DSCO order not found",
@@ -329,7 +329,7 @@ func (d *Domain) CheckOrders(ctx integration.TaskContext) (retErr error) {
 		}
 
 		results = append(results, integration.OrderCheckResult{
-			PONumber:     po,
+			PONumber:    po,
 			OK:          ok,
 			Code:        code,
 			Message:     msg,

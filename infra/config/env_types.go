@@ -7,6 +7,7 @@ import (
 
 type EnvConfig struct {
 	Base        BaseConfig        `yaml:"base"`
+	API         APIConfig         `yaml:"api"`
 	Auth        AuthConfig        `yaml:"auth"`
 	Integration IntegrationConfig `yaml:"integration"`
 	DB          gormx.Config      `yaml:"db"`
@@ -17,6 +18,11 @@ type EnvConfig struct {
 type BaseConfig struct {
 	ListenAddr string `yaml:"listen_addr"`
 	Env        string `yaml:"env"` // dev/test/release
+}
+
+type APIConfig struct {
+	Enable bool   `yaml:"enable"`
+	Token  string `yaml:"token"`
 }
 
 type AuthConfig struct {

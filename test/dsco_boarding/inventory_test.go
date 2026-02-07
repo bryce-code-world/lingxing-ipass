@@ -107,16 +107,16 @@ func TestBoarding_Method1_SingleItem_Create3SKUs(t *testing.T) {
 // - 该接口为异步：只校验 requestId 返回，具体处理结果需后续通过 inventory change log / streams 追踪
 func TestBoarding_Method2_SmallBatch_UpdateTo50(t *testing.T) {
 	cli := newClient(t)
-	qtys := []int{50, 50, 50}
+	qtys := []int{51, 52, 53}
 
 	items := make([]dsco.ItemInventory, 0, 3)
 	for i, sku := range skus {
 		qty := qtys[i]
-		gtin := gtins[i]
+		// gtin := gtins[i]
 		items = append(items, dsco.ItemInventory{
 			Item: dsco.Item{
-				SKU:  sku,
-				GTIN: &gtin,
+				SKU: sku,
+				// GTIN: &gtin,
 			},
 			Status:            "in-stock",
 			QuantityAvailable: &qty,

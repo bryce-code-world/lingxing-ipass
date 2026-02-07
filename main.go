@@ -13,6 +13,7 @@ import (
 	"example.com/lingxing/golib/v2/tool/logger"
 
 	"lingxingipass/admin"
+	"lingxingipass/api"
 	"lingxingipass/infra/config"
 	"lingxingipass/infra/db"
 	"lingxingipass/infra/runtimecfg"
@@ -75,6 +76,7 @@ func main() {
 	ops.Register(reg, opsDomain)
 
 	adminServer := admin.NewServer(envCfg, cfgMgr, reg, runner, orderStore, warehouseStore)
+	api.Register(adminServer.Engine(), envCfg, runner, warehouseStore)
 
 	httpSrv := httpserver.New(envCfg.Base.ListenAddr, adminServer.Engine(), cfgMgr, gdb)
 

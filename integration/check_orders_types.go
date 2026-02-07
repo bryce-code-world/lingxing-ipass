@@ -21,9 +21,9 @@ type OrderCheckResult struct {
 }
 
 type CheckOrdersResponse struct {
-	Results      []OrderCheckResult `json:"results"`
+	Results      []OrderCheckResult  `json:"results"`
 	MissingLocal []MissingLocalOrder `json:"missing_local"`
-	Meta         map[string]any     `json:"meta,omitempty"`
+	Meta         map[string]any      `json:"meta,omitempty"`
 }
 
 type MissingLocalOrder struct {

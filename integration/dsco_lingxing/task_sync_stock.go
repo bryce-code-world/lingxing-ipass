@@ -100,19 +100,41 @@ func (d *Domain) SyncStock(ctx integration.TaskContext) (retErr error) {
 		logger.Info(taskCtx, "task end", append(fields, "result", "ok")...)
 	}()
 
-	reverseSKU, err := buildReverseSKUMap(ctx.Config)
-	if err != nil {
-		retErr = err
-		return retErr
-	}
-
 	jobCfg, ok := ctx.Config.Jobs[ctx.Job]
 	doSync := ok && jobCfg.Sync
 	useStream := ok && jobCfg.UseStream
+
+	var ov SyncStockOverride
+	var hasOv bool
+	switch v := ctx.Override.(type) {
+	case SyncStockOverride:
+		ov = v
+		hasOv = true
+	case *SyncStockOverride:
+		if v != nil {
+			ov = *v
+			hasOv = true
+		}
+	}
+	if hasOv && ov.ForceDoSync != nil {
+		doSync = *ov.ForceDoSync
+	}
+
+	if hasOv && (ov.Source == SyncStockSourceDailyPulled || ov.Source == SyncStockSourceManualItems) {
+		retErr = d.syncStockByOverride(ctx, base, doSync, ov)
+		return retErr
+	}
+
 	if !doSync {
 		logger.Info(taskCtx, "sync disabled: will only pull and record",
 			append(base, "task", "sync_stock", "sync", false)...,
 		)
+	}
+
+	reverseSKU, err := buildReverseSKUMap(ctx.Config)
+	if err != nil {
+		retErr = err
+		return retErr
 	}
 
 	// 初始化客户端：领星；DSCO（可选）
@@ -368,13 +390,15 @@ func (d *Domain) SyncStock(ctx integration.TaskContext) (retErr error) {
 
 				if doSync {
 					partnerCopy := partner
+					status := dscoInventoryStatusForQty(lxQty)
 					invs = append(invs, dsco.ItemInventory{
 						Item: dsco.Item{
 							SKU:        partner,
 							PartnerSKU: &partnerCopy,
 						},
+						Status: status,
 						Warehouses: []dsco.ItemWarehouse{
-							{Code: dscoWarehouseCode, Quantity: &lxQty},
+							{Code: dscoWarehouseCode, Quantity: &lxQty, Status: status},
 						},
 						QuantityAvailable: &lxQty,
 					})
@@ -479,6 +503,198 @@ func (d *Domain) SyncStock(ctx integration.TaskContext) (retErr error) {
 				"dsco_invs", totalInvs,
 			)...,
 		)
+	}
+
+	return nil
+}
+
+func dscoInventoryStatusForQty(qty int) string {
+	if qty <= 0 {
+		return "out-of-stock"
+	}
+	return "in-stock"
+}
+
+func (d *Domain) syncStockByOverride(ctx integration.TaskContext, base []any, doSync bool, ov SyncStockOverride) error {
+	taskCtx := ctx.Ctx
+	if taskCtx == nil {
+		taskCtx = context.Background()
+	}
+
+	source := string(ov.Source)
+	if source == "" {
+		source = "unknown"
+	}
+
+	maxKeys := ov.MaxKeys
+	if maxKeys <= 0 {
+		maxKeys = 5000
+	}
+
+	type updateKey struct {
+		WID string
+		SKU string
+	}
+	target := make(map[updateKey]int) // dsco (warehouse_id + sku) -> qty
+
+	switch ov.Source {
+	case SyncStockSourceManualItems:
+		for i, it := range ov.ManualItems {
+			if strings.TrimSpace(it.DSCOWarehouseID) == "" || strings.TrimSpace(it.DSCOSKU) == "" {
+				return fmt.Errorf("manual_items[%d] missing dsco_wid/dsco_sku", i)
+			}
+			if it.Qty < 0 {
+				return fmt.Errorf("manual_items[%d] qty must be >= 0", i)
+			}
+			k := updateKey{WID: strings.TrimSpace(it.DSCOWarehouseID), SKU: strings.TrimSpace(it.DSCOSKU)}
+			target[k] = it.Qty
+		}
+	case SyncStockSourceDailyPulled:
+		if ov.DailyPulled == nil {
+			return errors.New("daily_pulled options is nil")
+		}
+		opt := *ov.DailyPulled
+		if opt.StartTime <= 0 || opt.EndTime <= 0 || opt.EndTime <= opt.StartTime {
+			return errors.New("daily_pulled invalid start/end time")
+		}
+
+		filter := store.DSCOWarehouseSyncListFilter{
+			StartTime: &opt.StartTime,
+			EndTime:   &opt.EndTime,
+
+			DSCOWarehouseID:     strings.TrimSpace(opt.DSCOWarehouseID),
+			LingXingWarehouseID: strings.TrimSpace(opt.LingXingWarehouseID),
+
+			DSCOWarehouseSKUIn:     opt.DSCOSKUList,
+			LingXingWarehouseSKUIn: opt.LingXingSKUList,
+
+			DiffNotZero: opt.DiffOnly,
+
+			Offset: 0,
+			Limit:  500,
+		}
+
+		var offset int
+		for {
+			filter.Offset = offset
+			items, total, err := d.warehouseStore.ListLatestByDSCOKey(taskCtx, filter)
+			if err != nil {
+				return err
+			}
+			if total > int64(maxKeys) {
+				return fmt.Errorf("%w: %d (max=%d)", ErrSyncStockTooManyKeys, total, maxKeys)
+			}
+			for _, row := range items {
+				k := updateKey{WID: row.DSCOWarehouseID, SKU: row.DSCOWarehouseSKU}
+				target[k] = row.LingXingWarehouseNum
+			}
+			offset += len(items)
+			if len(items) == 0 || offset >= int(total) {
+				break
+			}
+		}
+	default:
+		return fmt.Errorf("unsupported override source: %s", ov.Source)
+	}
+
+	logger.Info(taskCtx, "sync_stock override selected",
+		append(base,
+			"task", "sync_stock",
+			"source", source,
+			"dry_run", !doSync,
+			"keys", len(target),
+		)...,
+	)
+
+	if !doSync {
+		if ctx.Report != nil {
+			ctx.Report(map[string]any{
+				"run_id":   ctx.RunID,
+				"job":      "sync_stock",
+				"dry_run":  true,
+				"source":   source,
+				"keys":     len(target),
+				"max_keys": maxKeys,
+			})
+		}
+		return nil
+	}
+
+	dscoCli, err := d.dscoClient()
+	if err != nil {
+		return err
+	}
+
+	batchSize := ctx.Size
+	if batchSize <= 0 {
+		batchSize = 50
+	}
+
+	var dscoRequestIDs []string
+
+	var invs []dsco.ItemInventory
+	invs = make([]dsco.ItemInventory, 0, len(target))
+	for k, qty := range target {
+		partner := k.SKU
+		qtyCopy := qty
+		status := dscoInventoryStatusForQty(qtyCopy)
+		invs = append(invs, dsco.ItemInventory{
+			Item: dsco.Item{
+				SKU: partner,
+			},
+			Status:            status,
+			Warehouses:        []dsco.ItemWarehouse{{Code: k.WID, Quantity: &qtyCopy}},
+			QuantityAvailable: &qtyCopy,
+		})
+		invs[len(invs)-1].Warehouses[0].Status = status
+	}
+
+	for start := 0; start < len(invs); start += batchSize {
+		end := start + batchSize
+		if end > len(invs) {
+			end = len(invs)
+		}
+		batch := invs[start:end]
+		resp, err := dscoCli.Inventory.UpdateSmallBatch(taskCtx, batch, dsco.InventoryUpdateSmallBatchQuery{})
+		if err != nil {
+			return err
+		}
+		if resp != nil {
+			if strings.TrimSpace(resp.RequestID) != "" {
+				dscoRequestIDs = append(dscoRequestIDs, strings.TrimSpace(resp.RequestID))
+			}
+			logger.Info(taskCtx, "dsco inventory update accepted",
+				append(base,
+					"task", "sync_stock",
+					"source", source,
+					"dsco_status", resp.Status,
+					"dsco_request_id", resp.RequestID,
+					"dsco_event_date", resp.EventDate,
+				)...,
+			)
+		}
+		logger.Info(taskCtx, "sync_stock override batch sent",
+			append(base,
+				"task", "sync_stock",
+				"source", source,
+				"offset", start,
+				"count", len(batch),
+			)...,
+		)
+	}
+
+	if ctx.Report != nil {
+		// 注意：UpdateSmallBatch 为异步接口；这里只能代表“请求被 DSCO 接受并返回 requestId”，
+		// 最终处理结果需通过 DSCO stream/change log 跟踪（如有需要）。
+		ctx.Report(map[string]any{
+			"run_id":           ctx.RunID,
+			"job":              "sync_stock",
+			"dry_run":          false,
+			"source":           source,
+			"keys":             len(target),
+			"max_keys":         maxKeys,
+			"dsco_request_ids": dscoRequestIDs,
+		})
 	}
 
 	return nil
