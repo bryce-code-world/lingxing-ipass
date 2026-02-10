@@ -3,7 +3,7 @@ package db
 import (
 	"context"
 
-	"example.com/lingxing/golib/v2/tool/db/gormx"
+	"gitee.com/lsy007/golibv2/v2/tool/db/gormx"
 	"gorm.io/gorm"
 )
 

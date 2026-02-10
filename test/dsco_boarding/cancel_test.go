@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"example.com/lingxing/golib/v2/sdk/dsco"
+	"gitee.com/lsy007/golibv2/v2/sdk/dsco"
 )
 
 // 说明：

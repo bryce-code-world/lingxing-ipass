@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"example.com/lingxing/golib/v2/sdk/dsco"
-	"example.com/lingxing/golib/v2/sdk/lingxing"
-	"example.com/lingxing/golib/v2/tool/logger"
+	"gitee.com/lsy007/golibv2/v2/sdk/dsco"
+	"gitee.com/lsy007/golibv2/v2/sdk/lingxing"
+	"gitee.com/lsy007/golibv2/v2/tool/logger"
 
 	"lingxingipass/infra/store"
 	"lingxingipass/integration"

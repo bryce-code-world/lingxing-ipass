@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	"example.com/lingxing/golib/v2/tool/logger"
+	"gitee.com/lsy007/golibv2/v2/tool/logger"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"

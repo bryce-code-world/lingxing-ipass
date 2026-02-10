@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"time"
 
-	"example.com/lingxing/golib/v2/tool/logger"
+	"gitee.com/lsy007/golibv2/v2/tool/logger"
 
 	"lingxingipass/admin"
 	"lingxingipass/api"

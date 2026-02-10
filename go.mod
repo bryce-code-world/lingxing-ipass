@@ -5,14 +5,12 @@ go 1.23
 toolchain go1.23.0
 
 require (
-	example.com/lingxing/golib/v2 v2.0.0
+	gitee.com/lsy007/golibv2/v2 v2.0.2
 	github.com/gin-gonic/gin v1.10.0
 	github.com/robfig/cron/v3 v3.0.1
 	gopkg.in/yaml.v3 v3.0.1
 	gorm.io/gorm v1.25.12
 )
-
-replace example.com/lingxing/golib/v2 => ./golibv2/v2
 
 require (
 	filippo.io/edwards25519 v1.1.0 // indirect

@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"example.com/lingxing/golib/v2/sdk/lingxing"
+	"gitee.com/lsy007/golibv2/v2/sdk/lingxing"
 )
 
 // 查询仓库库存

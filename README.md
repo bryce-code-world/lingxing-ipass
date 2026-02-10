@@ -130,7 +130,7 @@ docker logs -f lingxingipass
 
 ### 日志与导出文件
 
-- 日志：统一使用 `example.com/lingxing/golib/v2/tool/logger`，输出到 `log.dir`（并可同时 stdout）。
+- 日志：统一使用 `gitee.com/lsy007/golibv2/v2/tool/logger`，输出到 `log.dir`（并可同时 stdout）。
 - 导出：Admin 的 CSV 导出落在 `admin.export.dir`，并提供清理任务（见 runtime config jobs）。
 
 ### 健康检查

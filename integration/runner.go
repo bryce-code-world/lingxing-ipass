@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"example.com/lingxing/golib/v2/tool/logger"
+	"gitee.com/lsy007/golibv2/v2/tool/logger"
 	"gorm.io/gorm"
 
 	"lingxingipass/infra/lock"

@@ -1,8 +1,8 @@
 package config
 
 import (
-	"example.com/lingxing/golib/v2/tool/db/gormx"
-	"example.com/lingxing/golib/v2/tool/logger"
+	"gitee.com/lsy007/golibv2/v2/tool/db/gormx"
+	"gitee.com/lsy007/golibv2/v2/tool/logger"
 )
 
 type EnvConfig struct {

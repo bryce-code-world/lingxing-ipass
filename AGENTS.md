@@ -18,9 +18,9 @@
   - DB 客户端封装：`infra/db`（内部调用 `golibv2/v2/tool/db/gormx`）
 - 迁移/建表：仅维护最新 `migrations/init.sql`（不引入迁移工具；禁止运行时 `AutoMigrate`）
 - 外部系统 SDK（通过 `go.mod replace` 指向本仓库的 `golibv2/v2`）：
-  - DSCO：`example.com/lingxing/golib/v2/sdk/dsco`
-  - 领星：`example.com/lingxing/golib/v2/sdk/lingxing`
-- 日志：统一使用 `example.com/lingxing/golib/v2/tool/logger`（禁止引入/复制其他日志实现）
+  - DSCO：`gitee.com/lsy007/golibv2/v2/sdk/dsco`
+  - 领星：`gitee.com/lsy007/golibv2/v2/sdk/lingxing`
+- 日志：统一使用 `gitee.com/lsy007/golibv2/v2/tool/logger`（禁止引入/复制其他日志实现）
 
 ---
 
