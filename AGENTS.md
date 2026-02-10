@@ -17,7 +17,7 @@
 - 数据库：PostgreSQL，一期使用 GORM（`gorm.io/gorm`）
   - DB 客户端封装：`infra/db`（内部调用 `golibv2/v2/tool/db/gormx`）
 - 迁移/建表：仅维护最新 `migrations/init.sql`（不引入迁移工具；禁止运行时 `AutoMigrate`）
-- 外部系统 SDK（通过 `go.mod replace` 指向本仓库的 `golibv2/v2`）：
+- 外部系统 SDK（通过 `go.mod` 直接依赖线上模块 `gitee.com/lsy007/golibv2/v2 v2.0.2`）：
   - DSCO：`gitee.com/lsy007/golibv2/v2/sdk/dsco`
   - 领星：`gitee.com/lsy007/golibv2/v2/sdk/lingxing`
 - 日志：统一使用 `gitee.com/lsy007/golibv2/v2/tool/logger`（禁止引入/复制其他日志实现）
@@ -129,7 +129,7 @@ infra/* ->（可被其他层调用，但不得反向依赖 integration/admin/tra
 
 ## 5. 公共方法/工具方法复用（强约束）
 
-- 优先复用 `golibv2/v2` 的实现（本仓库通过 `go.mod replace` 引用）
+- 优先复用 `golibv2/v2` 的实现（本仓库通过 `go.mod` 固定依赖 `gitee.com/lsy007/golibv2/v2 v2.0.2`）
 - 禁止在项目内复制一份“类似工具函数”造成重复与分叉
 - 禁止引入新的日志框架/DB 框架/HTTP 框架（除非明确需求并先确认）
 
@@ -160,4 +160,3 @@ infra/* ->（可被其他层调用，但不得反向依赖 integration/admin/tra
 - 禁止在业务代码里直接使用 `database/sql` 做 CRUD（必须走 GORM + store）
 - 禁止引入新的 Web 框架/ORM/日志框架（除非明确需求并先确认）
 - 禁止为了“未来扩展”提前引入抽象层或模式堆叠
-
