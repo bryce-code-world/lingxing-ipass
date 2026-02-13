@@ -8,7 +8,7 @@ var ErrSyncStockTooManyKeys = errors.New("sync_stock too many keys")
 type SyncStockSource string
 
 const (
-	SyncStockSourceDefault    SyncStockSource = ""
+	SyncStockSourceDefault     SyncStockSource = ""
 	SyncStockSourceDailyPulled SyncStockSource = "daily_pulled"
 	SyncStockSourceManualItems SyncStockSource = "manual_items"
 )

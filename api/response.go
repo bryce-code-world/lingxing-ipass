@@ -19,4 +19,3 @@ func ok(c *gin.Context, data any) {
 func fail(c *gin.Context, httpStatus int, code int, msg string) {
 	c.JSON(httpStatus, resp{Code: code, Message: msg})
 }
-

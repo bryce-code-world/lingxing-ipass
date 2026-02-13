@@ -31,4 +31,3 @@ func bearerAuth(token string) gin.HandlerFunc {
 		c.Next()
 	}
 }
-

@@ -17,7 +17,7 @@
 - 数据库：PostgreSQL，一期使用 GORM（`gorm.io/gorm`）
   - DB 客户端封装：`infra/db`（内部调用 `golibv2/v2/tool/db/gormx`）
 - 迁移/建表：仅维护最新 `migrations/init.sql`（不引入迁移工具；禁止运行时 `AutoMigrate`）
-- 外部系统 SDK（通过 `go.mod` 直接依赖线上模块 `gitee.com/lsy007/golibv2/v2 v2.0.2`）：
+- 外部系统 SDK（通过 `go.mod` 直接依赖线上模块 `gitee.com/lsy007/golibv2/v2`，版本以 `go.mod` 为准）：
   - DSCO：`gitee.com/lsy007/golibv2/v2/sdk/dsco`
   - 领星：`gitee.com/lsy007/golibv2/v2/sdk/lingxing`
 - 日志：统一使用 `gitee.com/lsy007/golibv2/v2/tool/logger`（禁止引入/复制其他日志实现）
@@ -129,7 +129,7 @@ infra/* ->（可被其他层调用，但不得反向依赖 integration/admin/tra
 
 ## 5. 公共方法/工具方法复用（强约束）
 
-- 优先复用 `golibv2/v2` 的实现（本仓库通过 `go.mod` 固定依赖 `gitee.com/lsy007/golibv2/v2 v2.0.2`）
+- 优先复用 `golibv2/v2` 的实现（本仓库通过 `go.mod` 依赖 `gitee.com/lsy007/golibv2/v2`，版本以 `go.mod` 为准）
 - 禁止在项目内复制一份“类似工具函数”造成重复与分叉
 - 禁止引入新的日志框架/DB 框架/HTTP 框架（除非明确需求并先确认）
 
@@ -160,3 +160,29 @@ infra/* ->（可被其他层调用，但不得反向依赖 integration/admin/tra
 - 禁止在业务代码里直接使用 `database/sql` 做 CRUD（必须走 GORM + store）
 - 禁止引入新的 Web 框架/ORM/日志框架（除非明确需求并先确认）
 - 禁止为了“未来扩展”提前引入抽象层或模式堆叠
+
+---
+
+## 9. `golibv2` 仓库协作规范（新增）
+
+本项目依赖 `gitee.com/lsy007/golibv2/v2`，当出现“SDK 字段/接口缺失、口径不一致”等问题时，优先在 `golibv2` 仓库协作修复，而不是在本项目里做临时绕过。
+
+### 9.1 字段/接口变更的判定依据（必须遵守）
+
+- **不得凭空新增字段**：是否存在/字段名/类型/可空性，必须以对应 SDK 文档为准：
+  - DSCO：`golibv2/v2/sdk/dsco/docs/dsco-api-spec.yaml`
+  - 领星：`golibv2/v2/sdk/lingxing/docs/*.md`
+
+### 9.2 标准协作流程（必须遵守）
+
+- 在 `golibv2` 仓库中完成：模型字段/请求响应结构/接口封装的变更，并提交/合并
+- **在本仓库只做版本升级**：通过更新 `go.mod` 的 `require gitee.com/lsy007/golibv2/v2 <version>` 引入变更（tag 或 pseudo-version 均可）
+- 仓库内如存在 `./golibv2/` 目录，仅用于阅读文档/参与 `golibv2` 开发协作，不作为本仓库依赖来源
+- 升级后必须执行：`go mod tidy`、`go test ./...`
+- PR/变更说明必须写清：对应的 `golibv2` 版本号（或 pseudo-version）与关键变更点（便于回溯）
+
+### 9.3 禁止事项（强约束）
+
+- 禁止提交 `go.mod` 的本地替换依赖（例如 `replace gitee.com/lsy007/golibv2/v2 => ./golibv2/v2` 或任何本地路径）
+  - 如确需本地调试，可在个人环境临时使用，但**提交前必须移除**，并确保 `go mod tidy` 后不残留
+- 禁止在本仓库复制/粘贴一份 `golibv2` SDK 源码作为“临时修复”（避免分叉）

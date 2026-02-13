@@ -26,4 +26,3 @@ func Register(engine *gin.Engine, env config.EnvConfig, runner *integration.Runn
 	v1.GET("/inventory/diff", inv.getDiff)
 	v1.POST("/inventory/sync", inv.postSync)
 }
-
