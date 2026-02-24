@@ -97,7 +97,7 @@ func (d *Domain) InvoiceToDSCO(ctx integration.TaskContext) (retErr error) {
 		return retErr
 	}
 
-	// SKU 反向映射：领星 SKU -> DSCO partnerSku（mapping.sku 的反向映射；缺省同名直传）。
+	// SKU 反向映射：领星 SKU -> DSCO sku（mapping.sku 的反向映射；缺省同名直传）。
 	reverseSKU, err := buildReverseSKUMap(ctx.Config)
 	if err != nil {
 		retErr = err
@@ -259,7 +259,7 @@ func (d *Domain) InvoiceToDSCO(ctx integration.TaskContext) (retErr error) {
 			continue
 		}
 
-		// 4) DSCO 行项目口径（以 partnerSku 为主键）：
+		// 4) DSCO 行项目口径（以 sku 为主键；sku 缺失时兜底 partnerSku）：
 		// - expectedQty：用于判断“是否全部已发货”
 		// - dscoItemId/lineNumber：用于发票行项目（尽量补齐以提升 DSCO 侧匹配成功率）
 		expectedQtyByPartner := map[string]int{}
@@ -267,48 +267,52 @@ func (d *Domain) InvoiceToDSCO(ctx integration.TaskContext) (retErr error) {
 		dscoItemIDConflict := map[string]bool{}
 		lineNumberByPartner := map[string]int{}
 		lineNumberConflict := map[string]bool{}
+		skuByKey := map[string]string{}
+		partnerByKey := map[string]string{}
+		aliasToKey := map[string]string{}
 		for _, li := range dscoOrder.LineItems {
-			partner := ""
-			if li.PartnerSKU != nil && strings.TrimSpace(*li.PartnerSKU) != "" {
-				partner = strings.TrimSpace(*li.PartnerSKU)
-			} else if li.SKU != nil && strings.TrimSpace(*li.SKU) != "" {
-				partner = strings.TrimSpace(*li.SKU)
-			}
-			if partner == "" {
+			key := dscoLineKey(li)
+			if key == "" {
 				continue
 			}
+			sku := dscoLineSKU(li)
+			partner := dscoLinePartnerSKU(li)
+			if sku != "" {
+				skuByKey[key] = sku
+				aliasToKey[sku] = key
+			}
+			if partner != "" {
+				partnerByKey[key] = partner
+				aliasToKey[partner] = key
+			}
+			aliasToKey[key] = key
 			if li.Quantity > 0 {
-				expectedQtyByPartner[partner] += li.Quantity
+				expectedQtyByPartner[key] += li.Quantity
 			}
 			if li.DscoItemID != nil && strings.TrimSpace(*li.DscoItemID) != "" {
 				id := strings.TrimSpace(*li.DscoItemID)
-				if prev, ok := dscoItemIDByPartner[partner]; ok && prev != id {
-					dscoItemIDConflict[partner] = true
+				if prev, ok := dscoItemIDByPartner[key]; ok && prev != id {
+					dscoItemIDConflict[key] = true
 				} else {
-					dscoItemIDByPartner[partner] = id
+					dscoItemIDByPartner[key] = id
 				}
 			}
 			if li.LineNumber != nil && *li.LineNumber > 0 {
-				if prev, ok := lineNumberByPartner[partner]; ok && prev != *li.LineNumber {
-					lineNumberConflict[partner] = true
+				if prev, ok := lineNumberByPartner[key]; ok && prev != *li.LineNumber {
+					lineNumberConflict[key] = true
 				}
-				lineNumberByPartner[partner] = *li.LineNumber
+				lineNumberByPartner[key] = *li.LineNumber
 			}
 		}
 
 		priceByPartner := map[string]float64{}
 		for _, li := range dscoOrder.LineItems {
-			p := ""
-			if li.PartnerSKU != nil {
-				p = *li.PartnerSKU
-			} else if li.SKU != nil {
-				p = *li.SKU
-			}
-			if p == "" {
+			key := dscoLineKey(li)
+			if key == "" {
 				continue
 			}
 			if price, ok := pickUnitPrice(li); ok {
-				priceByPartner[p] = price
+				priceByPartner[key] = price
 			}
 		}
 
@@ -353,6 +357,9 @@ func (d *Domain) InvoiceToDSCO(ctx integration.TaskContext) (retErr error) {
 				dscoPartner := strings.TrimSpace(reverseSKU[lxSKU])
 				if dscoPartner == "" {
 					dscoPartner = lxSKU
+				}
+				if alias, ok := aliasToKey[dscoPartner]; ok && alias != "" {
+					dscoPartner = alias
 				}
 				if dscoPartner == "" {
 					continue
@@ -409,9 +416,16 @@ func (d *Domain) InvoiceToDSCO(ctx integration.TaskContext) (retErr error) {
 				continue
 			}
 			line := dsco.InvoiceLineItem{
-				PartnerSKU: partner,
-				Quantity:   expected,
-				UnitPrice:  unit,
+				Quantity:  expected,
+				UnitPrice: unit,
+			}
+			if sku := strings.TrimSpace(skuByKey[partner]); sku != "" {
+				line.SKU = sku
+			} else {
+				line.SKU = partner
+			}
+			if ps := strings.TrimSpace(partnerByKey[partner]); ps != "" {
+				line.PartnerSKU = ps
 			}
 			if !dscoItemIDConflict[partner] {
 				if id := dscoItemIDByPartner[partner]; id != "" {

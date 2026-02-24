@@ -75,7 +75,7 @@ func joinTrackingSet(set map[string]struct{}) string {
 //  2. 幂等：不以本地 shipped_tracking_no 判断是否回传；是否跳过以 DSCO 实际 dscoStatus 为准。
 //  3. 使用领星 WmsOrderList 获取发货数据（可能多条出库单/多运单号），按 trackingNo 聚合后回传 DSCO。
 //  4. shipDate：每个 trackingNo 优先取 DeliveredAt；为空则用 StockDeliveredAt 兜底（已确认）。
-//  5. SKU 映射：领星 SKU 通过 mapping.sku 的反向映射得到 DSCO partnerSku（缺省同名直传）。
+//  5. SKU 映射：领星 SKU 通过 mapping.sku 的反向映射得到 DSCO sku（缺省同名直传；必要时兜底 partnerSku）。
 //  6. SID：WmsOrderList 查询需要 sid_arr；sid 从 mapping.shop 映射值解析得到（已确认）。
 //  7. 本地记录：回传成功后把 trackingNo（可能多条，用英文逗号拼接）写回 shipped_tracking_no，便于展示与筛选。
 //  8. 若同一 partnerSku 跨多个 tracking，需对该行设置 packageSpanFlag=true（否则部分零售商会拒绝 partial shipment）。
@@ -181,7 +181,7 @@ func (d *Domain) ShipToDSCO(ctx integration.TaskContext) (retErr error) {
 		)...,
 	)
 
-	// SKU 反向映射：领星 SKU -> DSCO partnerSku（mapping.sku 的反向映射；缺省同名直传）。
+	// SKU 反向映射：领星 SKU -> DSCO sku（mapping.sku 的反向映射；缺省同名直传）。
 	reverseSKU, err := buildReverseSKUMap(ctx.Config)
 	if err != nil {
 		retErr = err
@@ -365,35 +365,46 @@ func (d *Domain) ShipToDSCO(ctx integration.TaskContext) (retErr error) {
 			continue
 		}
 
-		// 6) dscoItemId/lineNumber 映射：用于 shipment 行项目（尽量补齐以提升 DSCO 侧匹配成功率）
-		dscoItemIDByPartner := map[string]string{}
-		lineNumberByPartner := map[string]int{}
+		// 6) 订单行映射：统一按 DSCO sku 主键（sku 缺失时兜底 partnerSku）
+		// - dscoItemId/lineNumber：用于 shipment 行项目增强匹配
+		// - sku/partnerSku：用于回传时双字段兼容
+		dscoItemIDByKey := map[string]string{}
+		lineNumberByKey := map[string]int{}
 		lineNumberConflict := map[string]bool{}
+		skuByKey := map[string]string{}
+		partnerByKey := map[string]string{}
+		aliasToKey := map[string]string{}
 		for _, li := range dscoOrder.LineItems {
-			partner := ""
-			if li.PartnerSKU != nil && strings.TrimSpace(*li.PartnerSKU) != "" {
-				partner = strings.TrimSpace(*li.PartnerSKU)
-			} else if li.SKU != nil && strings.TrimSpace(*li.SKU) != "" {
-				partner = strings.TrimSpace(*li.SKU)
-			}
-			if partner == "" {
+			key := dscoLineKey(li)
+			if key == "" {
 				continue
 			}
+			sku := dscoLineSKU(li)
+			partner := dscoLinePartnerSKU(li)
+			if sku != "" {
+				skuByKey[key] = sku
+				aliasToKey[sku] = key
+			}
+			if partner != "" {
+				partnerByKey[key] = partner
+				aliasToKey[partner] = key
+			}
+			aliasToKey[key] = key
 			if li.DscoItemID != nil && strings.TrimSpace(*li.DscoItemID) != "" {
-				dscoItemIDByPartner[partner] = strings.TrimSpace(*li.DscoItemID)
+				dscoItemIDByKey[key] = strings.TrimSpace(*li.DscoItemID)
 			}
 			if li.LineNumber != nil && *li.LineNumber > 0 {
-				if prev, ok := lineNumberByPartner[partner]; ok && prev != *li.LineNumber {
-					lineNumberConflict[partner] = true
+				if prev, ok := lineNumberByKey[key]; ok && prev != *li.LineNumber {
+					lineNumberConflict[key] = true
 				}
-				lineNumberByPartner[partner] = *li.LineNumber
+				lineNumberByKey[key] = *li.LineNumber
 			}
 		}
 
 		// 7) 组装 DSCO shipment：按 trackingNo 聚合（同一 PO 可能多运单号/多出库单）。
 		type shipAgg struct {
 			shipDate string
-			items    map[string]*dsco.ShipmentLineItemForUpdate // partnerSku -> item (sum quantity)
+			items    map[string]*dsco.ShipmentLineItemForUpdate // dscoKey -> item (sum quantity)
 		}
 		shipAggByTracking := map[string]*shipAgg{}
 
@@ -430,33 +441,43 @@ func (d *Domain) ShipToDSCO(ctx integration.TaskContext) (retErr error) {
 				if lxSKU == "" || p.Count <= 0 {
 					continue
 				}
-				dscoPartner := strings.TrimSpace(reverseSKU[lxSKU])
-				if dscoPartner == "" {
-					dscoPartner = lxSKU
+				dscoKey := strings.TrimSpace(reverseSKU[lxSKU])
+				if dscoKey == "" {
+					dscoKey = lxSKU
 				}
-				if dscoPartner == "" {
+				if alias, ok := aliasToKey[dscoKey]; ok && alias != "" {
+					dscoKey = alias
+				}
+				if dscoKey == "" {
 					continue
 				}
 
-				if it, ok := agg.items[dscoPartner]; ok {
+				if it, ok := agg.items[dscoKey]; ok {
 					it.Quantity += p.Count
 					continue
 				}
 
 				li := dsco.ShipmentLineItemForUpdate{
-					Quantity:   p.Count,
-					PartnerSKU: dscoPartner,
+					Quantity: p.Count,
 				}
-				if id := dscoItemIDByPartner[dscoPartner]; id != "" {
+				if sku := strings.TrimSpace(skuByKey[dscoKey]); sku != "" {
+					li.SKU = sku
+				} else {
+					li.SKU = dscoKey
+				}
+				if partner := strings.TrimSpace(partnerByKey[dscoKey]); partner != "" {
+					li.PartnerSKU = partner
+				}
+				if id := dscoItemIDByKey[dscoKey]; id != "" {
 					li.DscoItemID = id
 				}
-				if !lineNumberConflict[dscoPartner] {
-					if n := lineNumberByPartner[dscoPartner]; n > 0 {
+				if !lineNumberConflict[dscoKey] {
+					if n := lineNumberByKey[dscoKey]; n > 0 {
 						nn := n
 						li.LineNumber = &nn
 					}
 				}
-				agg.items[dscoPartner] = &li
+				agg.items[dscoKey] = &li
 			}
 		}
 
@@ -476,20 +497,15 @@ func (d *Domain) ShipToDSCO(ctx integration.TaskContext) (retErr error) {
 		}
 
 		// 7.1) “是否已全量发货”判断（以 DSCO 订单行数量为准）：
-		// - 只要有任一 partnerSku 的已发货数量 < DSCO 订单行期望数量，则认为未全量发货。
-		// - 未全量发货时允许先回传“部分 tracking”，但不推进本地状态到 4（避免后续 invoice 任务误触发）。
+		// - 只要有任一 dscoKey（sku 主口径）的已发货数量 < DSCO 订单行期望数量，则认为未全量发货。
+		// - 未全量发货时一律跳过 shipment 回传，等待下次任务重试。
 		expectedQtyByPartner := map[string]int{}
 		for _, li := range dscoOrder.LineItems {
-			partner := ""
-			if li.PartnerSKU != nil && strings.TrimSpace(*li.PartnerSKU) != "" {
-				partner = strings.TrimSpace(*li.PartnerSKU)
-			} else if li.SKU != nil && strings.TrimSpace(*li.SKU) != "" {
-				partner = strings.TrimSpace(*li.SKU)
-			}
-			if partner == "" || li.Quantity <= 0 {
+			key := dscoLineKey(li)
+			if key == "" || li.Quantity <= 0 {
 				continue
 			}
-			expectedQtyByPartner[partner] += li.Quantity
+			expectedQtyByPartner[key] += li.Quantity
 		}
 		shippedQtyByPartner := map[string]int{}
 		for _, agg := range shipAggByTracking {

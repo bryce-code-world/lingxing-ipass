@@ -71,8 +71,8 @@ func shortDSCOErr(err error) string {
 //  1. 遍历 mapping.warehouse（DSCO warehouseCode -> 领星 WID）。
 //  2. 对每个 WID 分页调用领星 InventoryDetails 拉取库存明细。
 //  3. 将领星库存条目转换为 DSCO ItemInventory 批量回写：
-//     - DSCO Item.SKU 与 Item.PartnerSKU 使用同一口径（partnerSku 口径；一期已确认先不区分）。
-//     - SKU 映射：领星 SKU -> DSCO partnerSku，优先使用 mapping.sku 的反向映射；缺省同名直传。
+//     - DSCO Item.SKU 采用 DSCO sku 主口径（必要时兼容 partnerSku）。
+//     - SKU 映射：领星 SKU -> DSCO sku，优先使用 mapping.sku 的反向映射；缺省同名直传。
 //     - 数量使用 领星 ProductValidNum（可用库存）。
 //  4. 写入 dsco_warehouse_sync 作为“同步记录”（一期 reason 字段默认不写）。
 //
@@ -159,7 +159,7 @@ func (d *Domain) SyncStock(ctx integration.TaskContext) (retErr error) {
 		ByWarehouseCode map[string]int
 		Err             string
 	}
-	dscoInvCache := make(map[string]dscoInvCacheEntry) // key=partnerSku
+	dscoInvCache := make(map[string]dscoInvCacheEntry) // key=dsco sku
 	if useStream && dscoCli != nil {
 		wantedWarehouseCodes := make(map[string]struct{}, len(ctx.Config.Mapping.Warehouse))
 		for code := range ctx.Config.Mapping.Warehouse {
@@ -306,7 +306,7 @@ func (d *Domain) SyncStock(ctx integration.TaskContext) (retErr error) {
 			var invs []dsco.ItemInventory
 			var rows []store.DSCOWarehouseSyncRow
 			for _, it := range items {
-				// 领星 SKU -> DSCO partnerSku（优先反向映射；缺省同名直传）
+				// 领星 SKU -> DSCO sku（优先反向映射；缺省同名直传）
 				partner := strings.TrimSpace(reverseSKU[it.SKU])
 				if partner == "" {
 					partner = strings.TrimSpace(it.SKU)

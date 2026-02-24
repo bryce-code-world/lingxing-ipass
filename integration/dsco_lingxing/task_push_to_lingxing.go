@@ -291,18 +291,12 @@ func (d *Domain) PushToLingXing(ctx integration.TaskContext) (retErr error) {
 		}
 
 		// 2.3) 行项目组装：
-		// - MSKU：直接使用 DSCO sku/partnerSku（领星侧可自动匹配）。
+		// - MSKU：优先使用 DSCO sku（主口径），缺失时兜底 partnerSku。
 		// - SKU：若在 mapping.sku 中存在映射，则补齐领星平台维度 SKU；否则不传（omitempty）。
 		// - 单价：按字段优先级选择，尽量避免领星校验失败。
 		createItems := make([]lingxing.CreateOrderItemV2, 0, len(order.LineItems))
 		for _, li := range order.LineItems {
-			msku := ""
-			// 一期口径：优先使用 DSCO partnerSku，否则使用 sku。
-			if li.PartnerSKU != nil && *li.PartnerSKU != "" {
-				msku = *li.PartnerSKU
-			} else if li.SKU != nil && *li.SKU != "" {
-				msku = *li.SKU
-			}
+			msku := dscoLineKey(li)
 			if msku == "" {
 				continue
 			}
@@ -319,7 +313,7 @@ func (d *Domain) PushToLingXing(ctx integration.TaskContext) (retErr error) {
 				continue
 			}
 
-			// SKU 补齐：从 mapping.sku（DSCO -> 领星）取值；无映射则不传（保持空字符串）。
+			// SKU 补齐：从 mapping.sku（DSCO sku -> 领星 sku）取值；无映射则不传（保持空字符串）。
 			sku := ""
 			if v, ok := ctx.Config.Mapping.SKU[msku]; ok {
 				sku = strings.TrimSpace(v)

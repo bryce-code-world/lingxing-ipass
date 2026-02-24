@@ -69,6 +69,8 @@ func parseInt64(v any) (int64, error) {
 func reverseMapStrict(m map[string]string) (map[string]string, error) {
 	out := make(map[string]string, len(m))
 	for k, v := range m {
+		k = strings.TrimSpace(k)
+		v = strings.TrimSpace(v)
 		if k == "" || v == "" {
 			return nil, errors.New("mapping contains empty key/value")
 		}
@@ -221,16 +223,50 @@ func getDSCOShippingServiceLevelCode(o dsco.Order) string {
 
 func buildReverseSKUMap(cfg runtimecfg.Config) (map[string]string, error) {
 	// 一期口径：
-	// - 推单到领星：SKU 不做映射，直接把 DSCO 行项目 SKU（优先 partnerSku，否则 sku）赋值到领星建单参数 msku，由领星侧自动匹配。
-	// - 库存回写到 DSCO：需要把“领星 SKU”反向映射回“DSCO partnerSku 口径”，因此需要构建反向 map。
+	// - 推单到领星：DSCO sku 对应领星 msku。
+	// - 领星侧回传到 DSCO（shipment/invoice/stock）：把“领星 SKU”反向映射回“DSCO SKU（lineItems.sku 主口径）”。
 	//
 	// mapping.sku（运行时配置）：
-	// - key：DSCO SKU（partnerSku 口径）
+	// - key：DSCO SKU（lineItems.sku 主口径）
 	// - value：领星 SKU
 	if len(cfg.Mapping.SKU) == 0 {
 		return map[string]string{}, nil
 	}
-	return reverseMapStrict(cfg.Mapping.SKU)
+	normalized := make(map[string]string, len(cfg.Mapping.SKU))
+	for rawK, rawV := range cfg.Mapping.SKU {
+		k := strings.TrimSpace(rawK)
+		v := strings.TrimSpace(rawV)
+		if k == "" || v == "" {
+			return nil, errors.New("mapping.sku contains empty key/value")
+		}
+		if old, ok := normalized[k]; ok && old != v {
+			return nil, fmt.Errorf("mapping.sku conflict: %q maps to both %q and %q", k, old, v)
+		}
+		normalized[k] = v
+	}
+	return reverseMapStrict(normalized)
+}
+
+func dscoLineSKU(li dsco.OrderLineItem) string {
+	if li.SKU != nil && strings.TrimSpace(*li.SKU) != "" {
+		return strings.TrimSpace(*li.SKU)
+	}
+	return ""
+}
+
+func dscoLinePartnerSKU(li dsco.OrderLineItem) string {
+	if li.PartnerSKU != nil && strings.TrimSpace(*li.PartnerSKU) != "" {
+		return strings.TrimSpace(*li.PartnerSKU)
+	}
+	return ""
+}
+
+// dscoLineKey 统一 DSCO 行项目主键口径：优先 sku，缺失时退化到 partnerSku。
+func dscoLineKey(li dsco.OrderLineItem) string {
+	if sku := dscoLineSKU(li); sku != "" {
+		return sku
+	}
+	return dscoLinePartnerSKU(li)
 }
 
 func shopKeyFromDSCOOrder(o dsco.Order) string {
