@@ -510,6 +510,22 @@ func (d *Domain) ShipToDSCO(ctx integration.TaskContext) (retErr error) {
 				break
 			}
 		}
+		if notReady {
+			skip++
+			logger.Info(taskCtx, "order done",
+				append(base,
+					"task", "ship_to_dsco",
+					"po_number", po,
+					"result", "skip",
+					"reason", "not_fully_shipped_wait_all",
+					"expected_qty", integration.JSONForLog(expectedQtyByPartner),
+					"shipped_qty", integration.JSONForLog(shippedQtyByPartner),
+					"tracking_sent", existingTracking,
+					"wms_orders_raw", integration.JSONForLog(wmsOrders),
+				)...,
+			)
+			continue
+		}
 
 		// 7.2) 增量回传：优先以 DSCO 侧 packages 做幂等判断；仅在无法获取 DSCO 订单时，才回退到本地 shipped_tracking_no。
 		alreadyInDSCOSet := existingTrackingSet
@@ -524,22 +540,6 @@ func (d *Domain) ShipToDSCO(ctx integration.TaskContext) (retErr error) {
 			shipAggToSend[tracking] = agg
 		}
 		if len(shipAggToSend) == 0 {
-			if notReady {
-				skip++
-				logger.Info(taskCtx, "order done",
-					append(base,
-						"task", "ship_to_dsco",
-						"po_number", po,
-						"result", "skip",
-						"reason", "not_fully_shipped_no_new_tracking",
-						"expected_qty", integration.JSONForLog(expectedQtyByPartner),
-						"shipped_qty", integration.JSONForLog(shippedQtyByPartner),
-						"tracking_sent", existingTracking,
-						"wms_orders_raw", integration.JSONForLog(wmsOrders),
-					)...,
-				)
-				continue
-			}
 			// 已全量发货，但没有新增 tracking 需要回传：说明之前已经回传过，推进到 status=4 等待回传发票。
 			if existingTracking == "" {
 				skip++
@@ -676,10 +676,7 @@ func (d *Domain) ShipToDSCO(ctx integration.TaskContext) (retErr error) {
 				existingTrackingSet[s] = struct{}{}
 			}
 		}
-		nextStatus := int16(3)
-		if !notReady {
-			nextStatus = 4
-		}
+		nextStatus := int16(4)
 		toUpdate = append(toUpdate, struct {
 			po       string
 			tracking string

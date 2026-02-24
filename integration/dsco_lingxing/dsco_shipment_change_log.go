@@ -110,4 +110,3 @@ func extractPONumberFromDSCOChangeLogPayload(raw json.RawMessage) string {
 	}
 	return ""
 }
-
