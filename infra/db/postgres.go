@@ -3,8 +3,8 @@ package db
 import (
 	"context"
 
-	"gitee.com/lsy007/golibv2/v2/tool/db/gormx"
 	"gorm.io/gorm"
+	"lingxingipass/golib/v2/tool/db/gormx"
 )
 
 func OpenPostgres(ctx context.Context, cfg gormx.Config) (*gorm.DB, error) {

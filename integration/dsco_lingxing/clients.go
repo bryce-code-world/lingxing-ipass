@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"gitee.com/lsy007/golibv2/v2/sdk/dsco"
-	"gitee.com/lsy007/golibv2/v2/sdk/lingxing"
+	"lingxingipass/golib/v2/sdk/dsco"
+	"lingxingipass/golib/v2/sdk/lingxing"
 )
 
 func (d *Domain) dscoClient() (*dsco.Client, error) {

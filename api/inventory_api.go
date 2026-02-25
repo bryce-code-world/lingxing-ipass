@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"gitee.com/lsy007/golibv2/v2/tool/logger"
 	"github.com/gin-gonic/gin"
+	"lingxingipass/golib/v2/tool/logger"
 
 	"lingxingipass/infra/runtimecfg"
 	"lingxingipass/infra/store"

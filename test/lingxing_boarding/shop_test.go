@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"gitee.com/lsy007/golibv2/v2/sdk/lingxing"
+	"lingxingipass/golib/v2/sdk/lingxing"
 )
 
 func TestShopService_MultiPlatformStoreListV2_RealEnv(t *testing.T) {

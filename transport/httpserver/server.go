@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	"gitee.com/lsy007/golibv2/v2/tool/logger"
+	"lingxingipass/golib/v2/tool/logger"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"

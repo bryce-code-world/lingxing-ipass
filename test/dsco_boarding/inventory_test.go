@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"golibv2/v2/sdk/dsco"
+	"lingxingipass/golib/v2/sdk/dsco"
 )
 
 // 说明：

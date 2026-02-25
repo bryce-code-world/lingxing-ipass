@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"gitee.com/lsy007/golibv2/v2/sdk/lingxing"
+	"lingxingipass/golib/v2/sdk/lingxing"
 )
 
 // 查询多平台 SKU 配对列表（原始响应）。

@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"gitee.com/lsy007/golibv2/v2/tool/logger"
+	"lingxingipass/golib/v2/tool/logger"
 
 	"github.com/robfig/cron/v3"
 

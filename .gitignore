@@ -10,3 +10,4 @@ deploy
 *.exe
 exports/
 restart.ps1
+AGENTS.*

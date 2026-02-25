@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"gitee.com/lsy007/golibv2/v2/sdk/lingxing"
+	"lingxingipass/golib/v2/sdk/lingxing"
 )
 
 const (

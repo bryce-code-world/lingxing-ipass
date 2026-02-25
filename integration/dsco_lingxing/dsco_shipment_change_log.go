@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"gitee.com/lsy007/golibv2/v2/sdk/dsco"
+	"lingxingipass/golib/v2/sdk/dsco"
 )
 
 type dscoShipmentChangeLogPayload struct {
